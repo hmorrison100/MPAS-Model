@@ -331,6 +331,7 @@
 !local variables and arrays:
  integer:: ncols,nlevs
  integer:: i,j,k,n
+ real(kind=RKIND):: qi_p3_in,qs_p3_in,rei_native,rei_um,snow_mass_factor
  real(kind=RKIND),dimension(:,:),allocatable:: p2d,o32d
 
 !-----------------------------------------------------------------------------------------------------------------
@@ -413,6 +414,84 @@
  radiation_lw_select: select case (trim(radt_lw_scheme))
     case("rrtmg_lw")
        microp_select: select case(microp_scheme)
+          case("mp_p3")
+             if(config_microp_re) then
+                   call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
+                   call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
+
+                   ! Port the original WRF P3 + RRTMG special handling directly into the
+                   ! MPAS radiation driver.  Route nearly all P3 cloud-ice mass through the
+                   ! snow-optics path, keep a small overlap in the cloud-ice path, and bound
+                   ! the snow generalized effective size the same way the WRF RRTMG wrapper
+                   ! does before the optics lookup tables are used.
+                   has_reqc = 1
+                   has_reqi = 1
+                   has_reqs = 1
+
+                   do j = jts,jte
+                   do k = kts,kte
+                   do i = its,ite
+                      if (re_cloud(k,i) > 0._RKIND .and. re_cloud(k,i) < 1.0e-2_RKIND) then
+                         recloud_p(i,k,j) = max(2.5e-6_RKIND, re_cloud(k,i))
+                      else
+                         recloud_p(i,k,j) = 2.5e-6_RKIND
+                      end if
+                      if (recloud_p(i,k,j) <= 2.5e-6_RKIND .and. cldfrac_p(i,k,j) > 0._RKIND) then
+                         if ((xland_p(i,j) - 1.5_RKIND) > 0._RKIND) then
+                            recloud_p(i,k,j) = 10.5e-6_RKIND
+                         else if ((xland_p(i,j) - 1.5_RKIND) < 0._RKIND) then
+                            recloud_p(i,k,j) = 7.5e-6_RKIND
+                         end if
+                      end if
+
+                      if (re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
+                         rei_native = re_ice(k,i)
+                      else
+                         rei_native = 25.0e-6_RKIND
+                      end if
+                      rei_um = rei_native * 1.0e6_RKIND
+
+                      snow_mass_factor = 0.99_RKIND
+                      if (rei_um > 130.0_RKIND) then
+                         snow_mass_factor = min(snow_mass_factor, (130.0_RKIND/rei_um)*(130.0_RKIND/rei_um))
+                         resnow_p(i,k,j) = 130.0e-6_RKIND
+                      else
+                         resnow_p(i,k,j) = max(10.0e-6_RKIND, rei_native)
+                      end if
+
+                      qi_p3_in = max(qirad_p(i,k,j), 0._RKIND)
+                      qs_p3_in = max(qsrad_p(i,k,j), 0._RKIND)
+                      qsrad_p(i,k,j) = qs_p3_in + qi_p3_in * snow_mass_factor
+                      qirad_p(i,k,j) = qi_p3_in * (1.0_RKIND - snow_mass_factor)
+
+                      reice_p(i,k,j) = 10.0e-6_RKIND
+                   enddo
+                   enddo
+                   enddo
+             else
+                do j = jts,jte
+                do k = kts,kte
+                do i = its,ite
+                   recloud_p(i,k,j) = 0._RKIND
+                   reice_p(i,k,j)   = 0._RKIND
+                   resnow_p(i,k,j)  = 0._RKIND
+                enddo
+                enddo
+                enddo
+             endif
+             do j = jts,jte
+             do k = kts,kte
+             do i = its,ite
+                rrecloud_p(i,k,j) = 0._RKIND
+                rreice_p(i,k,j)   = 0._RKIND
+                rresnow_p(i,k,j)  = 0._RKIND
+             enddo
+             enddo
+             enddo
+
+
+
+
           case("mp_thompson","mp_thompson_aerosols","mp_wsm6")
              if(config_microp_re) then
                 call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
@@ -695,6 +774,53 @@
                    rre_cloud(k,i) = rrecloud_p(i,k,j)
                    rre_ice(k,i)   = rreice_p(i,k,j)
                    rre_snow(k,i)  = rresnow_p(i,k,j)
+                enddo
+                enddo
+                enddo
+             else
+                do j = jts,jte
+                do k = kts,kte
+                do i = its,ite
+                   rre_cloud(k,i) = 0._RKIND
+                   rre_ice(k,i)   = 0._RKIND
+                   rre_snow(k,i)  = 0._RKIND
+                enddo
+                enddo
+                enddo
+             endif
+
+          case("mp_p3")
+             call mpas_pool_get_array(diag_physics,'rre_cloud',rre_cloud)
+             call mpas_pool_get_array(diag_physics,'rre_ice'  ,rre_ice  )
+             call mpas_pool_get_array(diag_physics,'rre_snow' ,rre_snow )
+             if(config_microp_re) then
+                do j = jts,jte
+                do k = kts,kte
+                do i = its,ite
+                   ! For P3, fall back to 1/re* if RRTMG_LW does not return rre*.
+                   if(rrecloud_p(i,k,j) .gt. 0._RKIND) then
+                      rre_cloud(k,i) = rrecloud_p(i,k,j)
+                   else if(recloud_p(i,k,j) .gt. 0._RKIND) then
+                      rre_cloud(k,i) = 1._RKIND / recloud_p(i,k,j)
+                   else
+                      rre_cloud(k,i) = 0._RKIND
+                   endif
+
+                   if(rreice_p(i,k,j) .gt. 0._RKIND) then
+                      rre_ice(k,i) = rreice_p(i,k,j)
+                   else if(reice_p(i,k,j) .gt. 0._RKIND) then
+                      rre_ice(k,i) = 1._RKIND / reice_p(i,k,j)
+                   else
+                      rre_ice(k,i) = 0._RKIND
+                   endif
+
+                   if(rresnow_p(i,k,j) .gt. 0._RKIND) then
+                      rre_snow(k,i) = rresnow_p(i,k,j)
+                   else if(resnow_p(i,k,j) .gt. 0._RKIND) then
+                      rre_snow(k,i) = 1._RKIND / resnow_p(i,k,j)
+                   else
+                      rre_snow(k,i) = 0._RKIND
+                   endif
                 enddo
                 enddo
                 enddo

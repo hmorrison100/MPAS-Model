@@ -19,6 +19,7 @@
  use mpas_kind_types
  use mpas_pool_routines
  use mpas_dmpar
+ use mpas_abort, only : mpas_dmpar_global_abort
  use mpas_atm_dimensions
 
  use mpas_atmphys_constants, only: R_d,R_v,degrad
@@ -204,6 +205,17 @@
 
  call mpas_pool_get_array(tend,'scalars_tend',tend_scalars)
 
+ if (trim(microp_scheme) == 'mp_p3') then
+    if (size(tend_scalars,1) /= size(scalars,1)) then
+       if (block % domain % dminfo % my_proc_id == IO_NODE) then
+          call mpas_log_write('P3DBG_FATAL: size(scalars,1) != size(scalars_tend,1): $i $i', &
+                              intArgs=(/size(scalars,1), size(tend_scalars,1)/), messageType=MPAS_LOG_CRIT)
+          call mpas_log_write('P3DBG_FATAL: Registry scalars_tend is missing one or more active P3 scalar entries.', &
+                              messageType=MPAS_LOG_CRIT)
+       end if
+       call mpas_dmpar_global_abort('physics_get_tend: P3 scalars_tend size mismatch with scalars.')
+    end if
+ end if
 
 !initialize the tendency for the potential temperature and all scalars due to PBL, convection,
 !and longwave and shortwave radiation:
@@ -411,7 +423,7 @@
           enddo
           enddo
 
-          if(trim(microp_scheme) == 'mp_thompson_aerosols') then
+          if(trim(microp_scheme) == 'mp_thompson_aerosols' .or. trim(microp_scheme) == 'mp_p3') then
              do i = 1, nCellsSolve
              do k = 1, nVertLevels
                 tend_scalars(index_nc,k,i) = tend_scalars(index_nc,k,i) + rncblten(k,i)*mass(k,i)

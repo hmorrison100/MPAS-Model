@@ -686,7 +686,8 @@
  dt_microp = dt_dyn
  n_microp  = 1
  if(trim(config_microp_scheme)=='mp_thompson' .or. &
-    trim(config_microp_scheme)=='mp_thompson_aerosols') then
+    trim(config_microp_scheme)=='mp_thompson_aerosols' .or. &
+    trim(config_microp_scheme)=='mp_p3') then
     dt_microp = 90._RKIND
     n_microp  = max(nint(dt_dyn/dt_microp),1)
     dt_microp = dt_dyn / n_microp
@@ -748,14 +749,20 @@
  has_reqi = 0
  has_reqs = 0
  if(config_microp_re) then
-    if(trim(config_microp_scheme)=='mp_thompson'          .or. &
-       trim(config_microp_scheme)=='mp_thompson_aerosols' .or. &
-       trim(config_microp_scheme)=='mp_wsm6') then
-       if(trim(config_radt_lw_scheme)=='rrtmg_lw' .and. trim(config_radt_sw_scheme)=='rrtmg_sw') then
-          has_reqc = 1
-          has_reqi = 1
-          has_reqs = 1
-       endif
+    if(trim(config_radt_lw_scheme)=='rrtmg_lw' .and. trim(config_radt_sw_scheme)=='rrtmg_sw') then
+       select case(trim(config_microp_scheme))
+          case('mp_thompson','mp_thompson_aerosols','mp_wsm6')
+             has_reqc = 1
+             has_reqi = 1
+             has_reqs = 1
+          case('mp_p3')
+             ! MPAS ports the WRF P3+RRTMG special handling directly in the radiation
+             ! drivers: P3 cloud ice is routed through the snow-optics path and a synthetic
+             ! snow effective size is provided from the native P3 bulk-ice radius.
+             has_reqc = 1
+             has_reqi = 1
+             has_reqs = 1
+       end select
     endif
  endif
  call mpas_log_write('--- has_reqc  = $i', intArgs=(/has_reqc/))

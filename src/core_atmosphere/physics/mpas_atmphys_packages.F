@@ -34,10 +34,11 @@
 
 !local variables:
  character(len=StrKIND),pointer:: config_microp_scheme
+ integer,pointer:: config_p3_nCat
  character(len=StrKIND),pointer:: config_convection_scheme
  character(len=StrKIND),pointer:: config_pbl_scheme
  character(len=StrKIND),pointer:: config_lsm_scheme
- logical,pointer:: mp_kessler_in,mp_thompson_in,mp_thompson_aers_in,mp_wsm6_in
+ logical,pointer:: mp_kessler_in,mp_thompson_in,mp_thompson_aers_in,mp_p3_in,mp_p3_cat2_in,mp_p3_cat3_in,mp_wsm6_in
  logical,pointer:: cu_grell_freitas_in,cu_kain_fritsch_in,cu_ntiedtke_in
  logical,pointer:: bl_mynn_in,bl_ysu_in
  logical,pointer:: sf_noahmp_in
@@ -57,6 +58,9 @@
 
  call mpas_pool_get_config(configs,'config_microp_scheme',config_microp_scheme)
 
+ nullify(config_p3_nCat)
+ call mpas_pool_get_config(configs,'config_p3_nCat',config_p3_nCat)
+
  nullify(mp_kessler_in)
  call mpas_pool_get_package(packages,'mp_kessler_inActive',mp_kessler_in)
 
@@ -66,13 +70,26 @@
  nullify(mp_thompson_aers_in)
  call mpas_pool_get_package(packages,'mp_thompson_aers_inActive',mp_thompson_aers_in)
 
+
+ nullify(mp_p3_in)
+ call mpas_pool_get_package(packages,'mp_p3_inActive',mp_p3_in)
+
+ nullify(mp_p3_cat2_in)
+ call mpas_pool_get_package(packages,'mp_p3_cat2_inActive',mp_p3_cat2_in)
+
+ nullify(mp_p3_cat3_in)
+ call mpas_pool_get_package(packages,'mp_p3_cat3_inActive',mp_p3_cat3_in)
+
  nullify(mp_wsm6_in)
  call mpas_pool_get_package(packages,'mp_wsm6_inActive',mp_wsm6_in)
 
- if(.not.associated(mp_kessler_in      )  .or. &
-    .not.associated(mp_thompson_in     ) .or. &
+ if (.not.associated(mp_kessler_in     ) .or. &
+    .not.associated(mp_thompson_in    ) .or. &
     .not.associated(mp_thompson_aers_in) .or. &
-    .not.associated(mp_wsm6_in)) then
+    .not.associated(mp_p3_in     ) .or. &
+    .not.associated(mp_p3_cat2_in) .or. &
+    .not.associated(mp_p3_cat3_in) .or. &
+    .not.associated(mp_wsm6_in        )) then
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
     call mpas_log_write('* Error while setting up packages for cloud microphysics options in atmosphere core.',messageType=MPAS_LOG_ERR)
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
@@ -83,6 +100,9 @@
  mp_kessler_in       = .false.
  mp_thompson_in      = .false.
  mp_thompson_aers_in = .false.
+ mp_p3_in       = .false.
+ mp_p3_cat2_in  = .false.
+ mp_p3_cat3_in  = .false.
  mp_wsm6_in          = .false.
 
  if(config_microp_scheme == 'mp_kessler') then
@@ -91,6 +111,24 @@
     mp_thompson_in = .true.
  elseif(config_microp_scheme == 'mp_thompson_aerosols') then
     mp_thompson_aers_in = .true.
+ elseif(config_microp_scheme == 'mp_p3') then
+    if (.not.associated(config_p3_nCat)) then
+       call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
+       call mpas_log_write('* Error: config_p3_nCat is required for mp_p3 package setup.',messageType=MPAS_LOG_ERR)
+       call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
+       ierr = 1
+       return
+    end if
+    if (config_p3_nCat < 1 .or. config_p3_nCat > 3) then
+       call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
+       call mpas_log_write('* Error: config_p3_nCat must be 1, 2, or 3 for mp_p3.',messageType=MPAS_LOG_ERR)
+       call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
+       ierr = 1
+       return
+    end if
+    mp_p3_in = .true.
+    if (config_p3_nCat >= 2) mp_p3_cat2_in = .true.
+    if (config_p3_nCat >= 3) mp_p3_cat3_in = .true.
  elseif(config_microp_scheme == 'mp_wsm6') then
     mp_wsm6_in = .true.
  endif
@@ -98,6 +136,9 @@
  call mpas_log_write('    mp_kessler_in           = $l', logicArgs=(/mp_kessler_in/))
  call mpas_log_write('    mp_thompson_in          = $l', logicArgs=(/mp_thompson_in/))
  call mpas_log_write('    mp_thompson_aers_in     = $l', logicArgs=(/mp_thompson_aers_in/))
+ call mpas_log_write('    mp_p3_in          = $l', logicArgs=(/mp_p3_in/))
+ call mpas_log_write('    mp_p3_cat2_in     = $l', logicArgs=(/mp_p3_cat2_in/))
+ call mpas_log_write('    mp_p3_cat3_in     = $l', logicArgs=(/mp_p3_cat3_in/))
  call mpas_log_write('    mp_wsm6_in              = $l', logicArgs=(/mp_wsm6_in/))
 
 !--- initialization of all packages for parameterizations of convection:

@@ -60,6 +60,7 @@ set(ATMOSPHERE_CORE_PHYSICS_WRF_SOURCES
     module_cu_gf.mpas.F
     module_mp_kessler.F
     module_mp_radar.F
+    module_mp_p3.F
     module_mp_thompson.F
     module_mp_thompson_cldfra3.F
     module_mp_thompson_aerosols.F

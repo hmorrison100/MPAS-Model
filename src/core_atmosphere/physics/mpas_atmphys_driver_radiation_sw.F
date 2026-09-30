@@ -177,7 +177,7 @@
        if(.not.allocated(asyaer_p)     ) allocate(asyaer_p(ims:ime,kms:kme,jms:jme,nbndsw) )
 
        aerosol_select: select case(mp_scheme)
-          case("mp_thompson_aerosols")
+          case("mp_thompson_aerosols","mp_p3")
              if(.not.allocated(ht_p)       ) allocate(ht_p(ims:ime,jms:jme)       )
              if(.not.allocated(taer_type_p)) allocate(taer_type_p(ims:ime,jms:jme))
              if(.not.allocated(taod5502d_p)) allocate(taod5502d_p(ims:ime,jms:jme))
@@ -305,7 +305,7 @@
        if(allocated(asyaer_p)     ) deallocate(asyaer_p     )
 
        aerosol_select: select case(mp_scheme)
-          case("mp_thompson","mp_thompson_aerosols")
+          case("mp_thompson","mp_thompson_aerosols","mp_p3")
              if(allocated(ht_p)       ) deallocate(ht_p       )
              if(allocated(taer_type_p)) deallocate(taer_type_p)
              if(allocated(taod5502d_p)) deallocate(taod5502d_p)
@@ -371,6 +371,7 @@
 
 !local variables:
  integer:: i,j,k,n
+ real(kind=RKIND):: qi_p3_in,qs_p3_in,rei_native,rei_um,snow_mass_factor
 
 !local pointers:
  logical,pointer:: config_o3climatology
@@ -494,6 +495,79 @@
        enddo
 
        microp_select: select case(microp_scheme)
+          case("mp_p3")
+
+                if (config_microp_re) then
+
+                   call mpas_pool_get_array(diag_physics, 're_cloud', re_cloud)
+                   call mpas_pool_get_array(diag_physics, 're_ice',   re_ice)
+
+                   ! Port the original WRF P3 + RRTMG special handling directly into the
+                   ! MPAS radiation driver.  Route nearly all P3 cloud-ice mass through the
+                   ! snow-optics path, keep a small overlap in the cloud-ice path, and bound
+                   ! the snow generalized effective size the same way the WRF RRTMG wrapper
+                   ! does before the optics lookup tables are used.
+                   has_reqc = 1
+                   has_reqi = 1
+                   has_reqs = 1
+
+                   do j = jts, jte
+                      do k = kts, kte
+                         do i = its, ite
+
+                            if (re_cloud(k,i) > 0._RKIND .and. re_cloud(k,i) < 1.0e-2_RKIND) then
+                               recloud_p(i,k,j) = max(2.5e-6_RKIND, re_cloud(k,i))
+                            else
+                               recloud_p(i,k,j) = 2.5e-6_RKIND
+                            end if
+                            if (recloud_p(i,k,j) <= 2.5e-6_RKIND .and. cldfrac_p(i,k,j) > 0._RKIND) then
+                               if ((xland_p(i,j) - 1.5_RKIND) > 0._RKIND) then
+                                  recloud_p(i,k,j) = 10.5e-6_RKIND
+                               else if ((xland_p(i,j) - 1.5_RKIND) < 0._RKIND) then
+                                  recloud_p(i,k,j) = 7.5e-6_RKIND
+                               end if
+                            end if
+
+                            if (re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
+                               rei_native = re_ice(k,i)
+                            else
+                               rei_native = 25.0e-6_RKIND
+                            end if
+                            rei_um = rei_native * 1.0e6_RKIND
+
+                            snow_mass_factor = 0.99_RKIND
+                            if (rei_um > 130.0_RKIND) then
+                               snow_mass_factor = min(snow_mass_factor, (130.0_RKIND/rei_um)*(130.0_RKIND/rei_um))
+                               resnow_p(i,k,j) = 130.0e-6_RKIND
+                            else
+                               resnow_p(i,k,j) = max(10.0e-6_RKIND, rei_native)
+                            end if
+
+                            qi_p3_in = max(qirad_p(i,k,j), 0._RKIND)
+                            qs_p3_in = max(qsrad_p(i,k,j), 0._RKIND)
+                            qsrad_p(i,k,j) = qs_p3_in + qi_p3_in * snow_mass_factor
+                            qirad_p(i,k,j) = qi_p3_in * (1.0_RKIND - snow_mass_factor)
+
+                            reice_p(i,k,j) = 10.0e-6_RKIND
+
+                         end do
+                      end do
+                   end do
+
+                else
+
+                   do j = jts, jte
+                      do k = kts, kte
+                         do i = its, ite
+                            recloud_p(i,k,j) = 0._RKIND
+                            reice_p(i,k,j)   = 0._RKIND
+                            resnow_p(i,k,j)  = 0._RKIND
+                         end do
+                      end do
+                   end do
+
+                end if
+
           case("mp_thompson","mp_thompson_aerosols","mp_wsm6")
              if(config_microp_re) then
                 call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
@@ -564,6 +638,54 @@
                 taod5502d(i) = taod5502d_p(i,j)
              enddo
              enddo
+
+             !--- calculation of the spectral optical depth, single-scattering albedo, and asymmetry factor
+             !as a function of the 550 nm optical depth of the water- and ice-friendly aerosols:
+             call calc_aerosol_rrtmg_sw( &
+                               ht       = ht_p         , dz8w     = dz_p        , &
+                               p        = pres_hyd_p   , t3d      = t_p         , &
+                               qv3d     = qv_p         , tauaer   = tauaer_p    , &
+                               ssaaer   = ssaaer_p     , asyaer   = asyaer_p    , &
+                               aod5502d = taod5502d_p  , aod5503d = taod5503d_p , &
+                               aer_type = taer_type_p  ,                                               &
+                               aer_aod550_opt = taer_aod550_opt , aer_angexp_opt = taer_angexp_opt   , &
+                               aer_ssa_opt    = taer_ssa_opt    , aer_asy_opt    = taer_asy_opt      , &
+                               aer_aod550_val = aer_aod550_val  , aer_angexp_val = aer_angexp_val    , &
+                               aer_ssa_val    = aer_ssa_val     , aer_asy_val    = aer_asy_val       , &
+                               ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme , &
+                               its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte   &
+                                        )
+
+          case("mp_p3")
+             call mpas_pool_get_array(mesh,'zgrid',zgrid)
+             call mpas_pool_get_array(diag_physics,'taod5502d',taod5502d)
+             call mpas_pool_get_array(diag_physics,'taod5503d',taod5503d)
+
+             aer_opt = 3
+             do j = jts,jte
+             do i = its,ite
+                ht_p(i,j) = zgrid(1,i)
+                if(xland_p(i,j)==1._RKIND) then
+                   taer_type_p(i,j) = 1
+                elseif(xland_p(i,j)==2._RKIND) then
+                   taer_type_p(i,j) = 3
+                endif
+             enddo
+             enddo
+
+             
+             ! Map MPAS diagnostic AOD onto WRF-style arrays used by RRTMG aerosol optics.
+             do j = jts, jte
+             do i = its, ite
+                taod5502d_p(i,j) = 0._RKIND
+                do k = kts, kte
+                   taod5503d_p(i,k,j) = max(taod5503d(k,i), 0._RKIND)
+                   taod5502d_p(i,j)   = taod5502d_p(i,j) + taod5503d_p(i,k,j)
+                end do
+                ! Prefer the column-integrated AOD provided by MPAS if available
+                taod5502d_p(i,j) = max(taod5502d(i), 0._RKIND)
+             end do
+             end do
 
              !--- calculation of the spectral optical depth, single-scattering albedo, and asymmetry factor
              !as a function of the 550 nm optical depth of the water- and ice-friendly aerosols:
