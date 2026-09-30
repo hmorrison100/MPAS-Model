@@ -24,7 +24,7 @@
  use module_mp_wsm6,only: wsm6
  use mp_wsm6,only: mp_wsm6_init,refl10cm_wsm6
 ! P3 aerosol-aware microphysics (MPAS wrapper + init)
- use module_mp_p3,        only : p3_init_for_mpas, mp_p3_aerosols
+ use microphy_p3,         only : p3_init_for_mpas, mp_p3_wrapper_mpas
  implicit none
  private
  public:: allocate_microphysics,   &
@@ -91,6 +91,10 @@
 
 !--- initialization option for WSM6 from WRF version 3.8.1. this option could also be set as a namelist parameter.
  integer,parameter:: hail_opt = 0
+
+!--- P3 equivalent reflectivity (dBZ) returned by P3 (diag_ze) at the last microphysics call; used by
+!    compute_radar_reflectivity instead of recomputing reflectivity outside of P3.
+ real(kind=RKIND),dimension(:,:,:),allocatable:: refl_p3_p
 
 
  contains
@@ -215,10 +219,14 @@ if(.not.allocated(rainprod_p)) allocate(rainprod_p(ims:ime,kms:kme,jms:jme))
 if(.not.allocated(evapprod_p)) allocate(evapprod_p(ims:ime,kms:kme,jms:jme))
 if (allocated(rainprod_p)) rainprod_p = 0._RKIND
 if (allocated(evapprod_p)) evapprod_p = 0._RKIND
-       
+
+       !--- P3 reflectivity (dBZ), filled from P3's diag_ze in driver_microphysics
+       if(.not.allocated(refl_p3_p)) allocate(refl_p3_p(ims:ime,kms:kme,jms:jme))
+       refl_p3_p = -35._RKIND
+
         ! P3 NOTE: Do not allocate full-domain 4D vmi/dmi/rhoi/dhmax arrays in MPAS.
         ! They are not required for MPAS bulk-compatible outputs and can be very memory-expensive.
-        ! Column-local vmi/dmi/rhoi/dhmax buffers are still passed to mp_p3_aerosols.
+        ! Column-local vmi/dmi/rhoi/dhmax buffers are still passed to mp_p3_wrapper_mpas.
        !--------------------------------------------------------------------------------
        ! P3 category prognostics / diagnostics are NOT present in standard MPAS IC files.
        ! For cold-start runs we must guarantee they start from a defined state; otherwise
@@ -335,6 +343,8 @@ if (allocated(evapprod_p)) evapprod_p = 0._RKIND
 
        !--- P3 diagnostics / work arrays
 
+       if(allocated(refl_p3_p)) deallocate(refl_p3_p)
+
        !--- Aerosol-aware fields (3-D + 2-D)
        if(allocated(nc_p)    ) deallocate(nc_p    )
        if(allocated(nwfa_p)  ) deallocate(nwfa_p  )
@@ -416,6 +426,7 @@ end subroutine deallocate_microphysics
 
 !local:
  integer :: p3_stat
+ integer :: p3_autoAccr_loc   ! warm-rain option actually passed to P3 (1-3)
  ! --- P3 scalar-index sanity check locals (used once in init; no timestep cost) ---
  integer, pointer :: idx_qit1, idx_qit2, idx_qit3
  integer, pointer :: idx_qni1, idx_qni2, idx_qni3
@@ -501,9 +512,28 @@ end subroutine deallocate_microphysics
 if (len_trim(p3_lookup_file_dir) == 0) then
           call mpas_log_write('WARNING: config_p3_lookup_file_dir is empty; P3 lookup init may fail.')
        end if
+
+       ! Warm-rain autoconversion/accretion: 1 = Seifert and Beheng (2001),
+       ! 2 = Khairoutdinov and Kogan (2000), 3 = Kogan (2013). P3 has no branch for
+       ! any other value, so passing the Registry default (0) would switch off
+       ! autoconversion, self-collection and accretion. Treat 0 as "not set" and use
+       ! P3's own default (2, KK2000); reject anything else.
+       select case (p3_autoAccr_param)
+          case (0)
+             p3_autoAccr_loc = 2
+          case (1:3)
+             p3_autoAccr_loc = p3_autoAccr_param
+          case default
+             write(mpas_err_message,'(A,I0,A)') 'ERROR: config_p3_autoAccr_param = ', p3_autoAccr_param, &
+                  ' is invalid (valid: 1, 2, 3, or 0 for the P3 default of 2)'
+             call physics_error_fatal(trim(mpas_err_message))
+       end select
+       call mpas_log_write('--- P3 warm-rain autoconversion/accretion option (autoAccr_param) = $i', &
+                           intArgs=(/p3_autoAccr_loc/))
+
                call p3_init_for_mpas(trim(p3_lookup_file_dir), p3_nCat, p3_trplMomI, p3_liqfrac, &
                      stat=p3_stat, abort_on_err=p3_abort_on_err, model='WRF', dowr=p3_dowr,    &
-                     autoAccr_param_in=p3_autoAccr_param, &
+                     autoAccr_param_in=p3_autoAccr_loc, &
                      debug_on=p3_debug_on, scpf_on=p3_scpf_on, p3_aerosols=p3_aerosols, &
                      clbfact_dep=p3_clbfact_dep, clbfact_sub=p3_clbfact_sub, &
                      scpf_pfrac=p3_scpf_pfrac, scpf_resfact=p3_scpf_resfact, &
@@ -1058,7 +1088,7 @@ vmi1d(k,c)   = 0.0_RKIND
                 ii_loc = i
                 jj_loc = j
 
-                call mp_p3_aerosols( &
+                call mp_p3_wrapper_mpas( &
                      qv1d, qc1d, qi1d, qr1d, qs1d, qg1d, ni1d, nr1d, nc1d, &
                      nwfa1d, nifa1d, &
                      thold1d, qvold1d, &
@@ -1272,6 +1302,9 @@ vmi1d(k,c)   = 0.0_RKIND
                 nc_p(i,k,j)   = nc1d(k)
                 nwfa_p(i,k,j) = nwfa1d(k)
                 nifa_p(i,k,j) = nifa1d(k)
+
+                ! P3 equivalent reflectivity (diag_ze, dBZ) from the last substep
+                refl_p3_p(i,k,j) = zdbz1d(k)
 
                 ! Radiation coupling (WRF-P3 units: meters): map P3 effective radii to MPAS fields
                 if (allocated(recloud_p)) recloud_p(i,k,j) = max(1.0e-9_RKIND, effc1d(k))
@@ -1674,14 +1707,8 @@ end if
 
 case ("mp_p3")
 
-   if(.not.allocated(p1d)  ) allocate(p1d(kts:kte)  )
-   if(.not.allocated(t1d)  ) allocate(t1d(kts:kte)  )
-   if(.not.allocated(qv1d) ) allocate(qv1d(kts:kte) )
-   if(.not.allocated(qc1d) ) allocate(qc1d(kts:kte) )
-   if(.not.allocated(qr1d) ) allocate(qr1d(kts:kte) )
-   if(.not.allocated(qs1d) ) allocate(qs1d(kts:kte) )
-   if(.not.allocated(qg1d) ) allocate(qg1d(kts:kte) )
-   if(.not.allocated(nr1d) ) allocate(nr1d(kts:kte) )
+   !--- use the equivalent reflectivity computed inside P3 (diag_ze, consistent with the P3 cloud,
+   !    rain and ice-category size distributions), saved in refl_p3_p by driver_microphysics.
    if(.not.allocated(dBZ1d)) allocate(dBZ1d(kts:kte))
    if(.not.allocated(zp)   ) allocate(zp(kts:kte)   )
 
@@ -1689,22 +1716,13 @@ case ("mp_p3")
    do i = its,ite
 
       do k = kts,kte
-         p1d(k)  = pres_p(i,k,j)
-         t1d(k)  = th_p(i,k,j) * pi_p(i,k,j)
-         qv1d(k) = qv_p(i,k,j)
-         qc1d(k) = qc_p(i,k,j)
-         qr1d(k) = qr_p(i,k,j)
-         qs1d(k) = qs_p(i,k,j)
-         qg1d(k) = qg_p(i,k,j)
-         nr1d(k) = nr_p(i,k,j)
-         zp(k)   = z_p(i,k,j) - z_p(i,1,j) + 0.5_RKIND*dz_p(i,k,j)
+         dBZ1d(k) = refl_p3_p(i,k,j)
+         zp(k)    = z_p(i,k,j) - z_p(i,1,j) + 0.5_RKIND*dz_p(i,k,j)
       enddo
 
-      call calc_refl10cm(qv1d,qc1d,qr1d,nr1d,qs1d,qg1d,t1d,p1d,dBZ1d,kts,kte,i,j)
-
+      !--- no -35 dBZ floor for P3: output P3's own values (about -99 dBZ where there are no hydrometeors).
       kp = 1
       do k = kts,kte
-         dBZ1d(k) = max(-35._RKIND,dBZ1d(k))
          refl10cm(k,i) = dBZ1d(k)
          if(zp(k) .lt. 1000._RKIND) kp = k
       enddo
@@ -1719,14 +1737,6 @@ case ("mp_p3")
    enddo
    enddo
 
-   if(allocated(p1d)  ) deallocate(p1d  )
-   if(allocated(t1d)  ) deallocate(t1d  )
-   if(allocated(qv1d) ) deallocate(qv1d )
-   if(allocated(qc1d) ) deallocate(qc1d )
-   if(allocated(qr1d) ) deallocate(qr1d )
-   if(allocated(qs1d) ) deallocate(qs1d )
-   if(allocated(qg1d) ) deallocate(qg1d )
-   if(allocated(nr1d) ) deallocate(nr1d )
    if(allocated(dBZ1d)) deallocate(dBZ1d)
    if(allocated(zp)   ) deallocate(zp   )
 

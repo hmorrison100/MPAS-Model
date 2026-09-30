@@ -370,7 +370,8 @@
  enddo
 
  microp_select: select case(trim(microp_scheme))
-    case("mp_thompson_aerosols")
+    !mp_p3: nwfa/nifa are also needed by the RRTMG shortwave aerosol optics (gt_aod).
+    case("mp_thompson_aerosols","mp_p3")
        nullify(nifa)
        nullify(nwfa)
        call mpas_pool_get_dimension(state,'index_nifa',index_nifa)

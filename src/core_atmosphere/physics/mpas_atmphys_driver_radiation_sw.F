@@ -376,6 +376,7 @@
 !local pointers:
  logical,pointer:: config_o3climatology
  logical,pointer:: config_microp_re
+ logical,pointer:: config_p3_aerosols
  character(len=StrKIND),pointer:: radt_sw_scheme
  character(len=StrKIND),pointer:: microp_scheme
 
@@ -657,6 +658,12 @@
                                         )
 
           case("mp_p3")
+             !--- P3: aerosol direct effect computed exactly as for mp_thompson_aerosols, from the
+             !    prognostic water- and ice-friendly aerosols (nwfa, nifa), when P3 runs aerosol-aware.
+             !    With config_p3_aerosols = .false., aer_opt stays 0 (no aerosol), as for mp_thompson.
+             call mpas_pool_get_config(configs,'config_p3_aerosols',config_p3_aerosols)
+             if(config_p3_aerosols) then
+
              call mpas_pool_get_array(mesh,'zgrid',zgrid)
              call mpas_pool_get_array(diag_physics,'taod5502d',taod5502d)
              call mpas_pool_get_array(diag_physics,'taod5503d',taod5503d)
@@ -673,19 +680,24 @@
              enddo
              enddo
 
-             
-             ! Map MPAS diagnostic AOD onto WRF-style arrays used by RRTMG aerosol optics.
-             do j = jts, jte
-             do i = its, ite
+             !--- calculation of the 550 nm optical depth of the water- and ice-friendly aerosols:
+             call gt_aod( &
+                     p_phy = pres_hyd_p , dz8w = dz_p   , t_phy     = t_p         , qvapor = qv_p , &
+                     nwfa  = nwfa_p     , nifa = nifa_p , taod5503d = taod5503d_p ,                 &
+                     ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme ,        &
+                     its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte          &
+                        )
+
+             do j = jts,jte
+             do i = its,ite
                 taod5502d_p(i,j) = 0._RKIND
-                do k = kts, kte
-                   taod5503d_p(i,k,j) = max(taod5503d(k,i), 0._RKIND)
-                   taod5502d_p(i,j)   = taod5502d_p(i,j) + taod5503d_p(i,k,j)
-                end do
-                ! Prefer the column-integrated AOD provided by MPAS if available
-                taod5502d_p(i,j) = max(taod5502d(i), 0._RKIND)
-             end do
-             end do
+                do k = kts,kte
+                   taod5502d_p(i,j) = taod5502d_p(i,j) + taod5503d_p(i,k,j)
+                   taod5503d(k,i) = taod5503d_p(i,k,j)
+                enddo
+                taod5502d(i) = taod5502d_p(i,j)
+             enddo
+             enddo
 
              !--- calculation of the spectral optical depth, single-scattering albedo, and asymmetry factor
              !as a function of the 550 nm optical depth of the water- and ice-friendly aerosols:
@@ -703,6 +715,8 @@
                                ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme , &
                                its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte   &
                                         )
+
+             endif
 
           case default
        end select aerosol_select
