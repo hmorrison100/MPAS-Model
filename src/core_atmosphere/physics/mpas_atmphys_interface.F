@@ -81,7 +81,29 @@
 ! * changed microphysics update such that the microphsyics tendency is ignored above level mp_top_level
 !   Bill Skamarock / 2025/10/17 
 
+!P3 does not allocate the bulk snow and graupel scalars (qs is allocated only with MYNN, via bl_mynn_in; qg
+!never). Where shared code reads qs/qg for mp_p3, the pointers are redirected to this all-zero field instead
+!of scalars(-1,:,:):
+ real(kind=RKIND),dimension(:,:),allocatable,target:: p3_zero_qsqg
+
  contains
+
+!=================================================================================================================
+ subroutine p3_set_zero_qsqg(scalars)
+!=================================================================================================================
+!allocates (or resizes) the all-zero field used in place of the unallocated qs and qg scalars with mp_p3.
+ real(kind=RKIND),intent(in),dimension(:,:,:):: scalars
+
+ if(allocated(p3_zero_qsqg)) then
+    if(size(p3_zero_qsqg,1) /= size(scalars,2) .or. size(p3_zero_qsqg,2) /= size(scalars,3)) &
+       deallocate(p3_zero_qsqg)
+ endif
+ if(.not. allocated(p3_zero_qsqg)) then
+    allocate(p3_zero_qsqg(size(scalars,2),size(scalars,3)))
+    p3_zero_qsqg(:,:) = 0._RKIND
+ endif
+
+ end subroutine p3_set_zero_qsqg
 
 
 !=================================================================================================================
@@ -335,6 +357,12 @@
  qi => scalars(index_qi,:,:)
  qs => scalars(index_qs,:,:)
  qg => scalars(index_qg,:,:)
+ if(trim(microp_scheme) == 'mp_p3') then
+    !qs (without MYNN) and qg are not allocated with mp_p3: use zeros for qs_p and qg_p.
+    call p3_set_zero_qsqg(scalars)
+    if(index_qs < 1) qs => p3_zero_qsqg
+    if(index_qg < 1) qg => p3_zero_qsqg
+ endif
 
  call mpas_pool_get_array(diag_physics,'plrad',plrad)
 
@@ -889,12 +917,23 @@ end subroutine pre_microphysics
            p3dbg_banner_printed = .true.
         end if! MPAS bulk-compatible packing of bulk hydrometeors + number concentrations
 ! so downstream MPAS diagnostics and radiation coupling see the same fields as Thompson.
+! qs is allocated only with MYNN and qg never; otherwise read zeros (also used by the qs/qg
+! tendency diagnostics below).
 call mpas_pool_get_dimension(state,'index_qi',index_qi)
 call mpas_pool_get_dimension(state,'index_qs',index_qs)
 call mpas_pool_get_dimension(state,'index_qg',index_qg)
+call p3_set_zero_qsqg(scalars)
 qi => scalars(index_qi,:,:)
-qs => scalars(index_qs,:,:)
-qg => scalars(index_qg,:,:)
+if (index_qs > 0) then
+   qs => scalars(index_qs,:,:)
+else
+   qs => p3_zero_qsqg
+end if
+if (index_qg > 0) then
+   qg => scalars(index_qg,:,:)
+else
+   qg => p3_zero_qsqg
+end if
 
 call mpas_pool_get_dimension(state,'index_ni',index_ni)
 call mpas_pool_get_dimension(state,'index_nr',index_nr)
@@ -1488,12 +1527,22 @@ end if
    call mpas_pool_get_config(configs,'config_p3_liqfrac' ,p3_liqfrac )
 
 ! Bulk hydrometeors + number concentrations (match MPAS bulk scalar layout)
+! qs is allocated only with MYNN and qg never; the zero field is never written.
 call mpas_pool_get_dimension(state,'index_qi',index_qi)
 call mpas_pool_get_dimension(state,'index_qs',index_qs)
 call mpas_pool_get_dimension(state,'index_qg',index_qg)
+call p3_set_zero_qsqg(scalars)
 qi => scalars(index_qi,:,:)
-qs => scalars(index_qs,:,:)
-qg => scalars(index_qg,:,:)
+if (index_qs > 0) then
+   qs => scalars(index_qs,:,:)
+else
+   qs => p3_zero_qsqg
+end if
+if (index_qg > 0) then
+   qg => scalars(index_qg,:,:)
+else
+   qg => p3_zero_qsqg
+end if
 
 call mpas_pool_get_dimension(state,'index_ni',index_ni)
 call mpas_pool_get_dimension(state,'index_nr',index_nr)
@@ -1504,8 +1553,8 @@ do j = jts,jte
 do k = kts,kte
 do i = its,ite
    qi(k,i) = max(0._RKIND, qi_p(i,k,j))
-   qs(k,i) = max(0._RKIND, qs_p(i,k,j))
-   qg(k,i) = max(0._RKIND, qg_p(i,k,j))
+   if (index_qs > 0) qs(k,i) = max(0._RKIND, qs_p(i,k,j))
+   if (index_qg > 0) qg(k,i) = max(0._RKIND, qg_p(i,k,j))
    ni(k,i) = max(0._RKIND, ni_p(i,k,j))
    nr(k,i) = max(0._RKIND, nr_p(i,k,j))
 end do

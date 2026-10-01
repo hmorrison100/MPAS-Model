@@ -815,6 +815,14 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
         p3_trplMomI = p3_trplMomI_ptr
         call mpas_pool_get_config(configs,'config_p3_liqfrac',p3_liqfrac_ptr)
         p3_liqfrac = p3_liqfrac_ptr
+
+        ! p3_qzi*/p3_qli* are allocated (index > 0) exactly when the corresponding option is on.
+        if ((p3_trplMomI .neqv. (idx_qzi > 0)) .or. (p3_liqfrac .neqv. (idx_qli > 0))) then
+           write(errmsg,'(A,L1,A,I0,A,L1,A,I0)') 'P3DBG_FATAL: config_p3_trplMomI=', p3_trplMomI, &
+                ' but index_p3_qzi=', idx_qzi, '; config_p3_liqfrac=', p3_liqfrac, ' but index_p3_qli=', idx_qli
+           call mpas_log_write(errmsg)
+           call physics_error_fatal(trim(errmsg))
+        end if
         
         if (associated(p3_debug_on_ptr) .and. p3_debug_on_ptr .and. .not. p3dbg_drv_banner_printed) then
            p3dbg_drv_banner_printed = .true.
@@ -899,20 +907,17 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                       if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
                       scalars(idx_qib + (cc-1), k, i) = vtmp
 
+                      ! p3_qzi*/p3_qli* exist only when the option is on (packages mp_p3_3mom*/mp_p3_lf*)
                       if (p3_trplMomI) then
                          vtmp = scalars(idx_qzi + (cc-1), k, i)
                          if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
                          scalars(idx_qzi + (cc-1), k, i) = vtmp
-                      else
-                         scalars(idx_qzi + (cc-1), k, i) = 0._RKIND
                       end if
 
                       if (p3_liqfrac) then
                          vtmp = scalars(idx_qli + (cc-1), k, i)
                          if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
                          scalars(idx_qli + (cc-1), k, i) = vtmp
-                      else
-                         scalars(idx_qli + (cc-1), k, i) = 0._RKIND
                       end if
                    end do
 
@@ -932,16 +937,6 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                          scalars(idx_qni + (cc-1), k, i) = 0._RKIND
                       end do
                    end if
-
-                   ! Force unused categories (beyond config nCat) to 0 every call (MPAS-compatible)
-                   do cc = p3_nCat+1, nCat_layout_drv
-                      scalars(idx_qit + (cc-1), k, i) = 0._RKIND
-                      scalars(idx_qni + (cc-1), k, i) = 0._RKIND
-                      scalars(idx_qir + (cc-1), k, i) = 0._RKIND
-                      scalars(idx_qib + (cc-1), k, i) = 0._RKIND
-                      scalars(idx_qzi + (cc-1), k, i) = 0._RKIND
-                      scalars(idx_qli + (cc-1), k, i) = 0._RKIND
-                   end do
                 end block
 
                 ! Default: single-category ice for MPAS wrapper

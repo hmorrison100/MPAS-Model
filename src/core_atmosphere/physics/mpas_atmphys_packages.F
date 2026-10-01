@@ -41,6 +41,9 @@
  logical,pointer:: mp_kessler_in,mp_thompson_in,mp_thompson_aers_in,mp_p3_in,mp_p3_cat2_in,mp_p3_cat3_in,mp_wsm6_in
  logical,pointer:: cu_grell_freitas_in,cu_kain_fritsch_in,cu_ntiedtke_in
  logical,pointer:: bl_mynn_in,bl_ysu_in
+ logical,pointer:: config_p3_trplMomI,config_p3_liqfrac
+ logical,pointer:: mp_p3_3mom_in,mp_p3_3mom_cat2_in,mp_p3_3mom_cat3_in
+ logical,pointer:: mp_p3_lf_in,mp_p3_lf_cat2_in,mp_p3_lf_cat3_in,mp_p3_bl_mynn_in
  logical,pointer:: sf_noahmp_in
 
  integer :: ierr
@@ -212,6 +215,61 @@
  call mpas_log_write('    bl_mynn_in              = $l', logicArgs=(/bl_mynn_in/))
  call mpas_log_write('    bl_ysu_in               = $l', logicArgs=(/bl_ysu_in/))
  call mpas_log_write('')
+
+!--- P3 optional prognostic scalars. Registry packages are OR-lists, so each (option, category)
+!    combination has its own package. These are set after the PBL packages because lbc_qs and
+!    qs_amb must follow qs, which is a state scalar for P3 only when MYNN is active (bl_mynn_in).
+
+ nullify(config_p3_trplMomI)
+ call mpas_pool_get_config(configs,'config_p3_trplMomI',config_p3_trplMomI)
+ nullify(config_p3_liqfrac)
+ call mpas_pool_get_config(configs,'config_p3_liqfrac',config_p3_liqfrac)
+
+ nullify(mp_p3_3mom_in)
+ call mpas_pool_get_package(packages,'mp_p3_3mom_inActive',mp_p3_3mom_in)
+ nullify(mp_p3_3mom_cat2_in)
+ call mpas_pool_get_package(packages,'mp_p3_3mom_cat2_inActive',mp_p3_3mom_cat2_in)
+ nullify(mp_p3_3mom_cat3_in)
+ call mpas_pool_get_package(packages,'mp_p3_3mom_cat3_inActive',mp_p3_3mom_cat3_in)
+ nullify(mp_p3_lf_in)
+ call mpas_pool_get_package(packages,'mp_p3_lf_inActive',mp_p3_lf_in)
+ nullify(mp_p3_lf_cat2_in)
+ call mpas_pool_get_package(packages,'mp_p3_lf_cat2_inActive',mp_p3_lf_cat2_in)
+ nullify(mp_p3_lf_cat3_in)
+ call mpas_pool_get_package(packages,'mp_p3_lf_cat3_inActive',mp_p3_lf_cat3_in)
+ nullify(mp_p3_bl_mynn_in)
+ call mpas_pool_get_package(packages,'mp_p3_bl_mynn_inActive',mp_p3_bl_mynn_in)
+
+ if(.not.associated(config_p3_trplMomI) .or. .not.associated(config_p3_liqfrac) .or. &
+    .not.associated(mp_p3_3mom_in) .or. .not.associated(mp_p3_3mom_cat2_in) .or.   &
+    .not.associated(mp_p3_3mom_cat3_in) .or. .not.associated(mp_p3_lf_in) .or.      &
+    .not.associated(mp_p3_lf_cat2_in) .or. .not.associated(mp_p3_lf_cat3_in) .or.   &
+    .not.associated(mp_p3_bl_mynn_in)) then
+    call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
+    call mpas_log_write('* Error while setting up packages for P3 optional prognostic scalars.',                 messageType=MPAS_LOG_ERR)
+    call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
+    ierr = 1
+    return
+ endif
+
+ mp_p3_3mom_in      = mp_p3_in      .and. config_p3_trplMomI
+ mp_p3_3mom_cat2_in = mp_p3_cat2_in .and. config_p3_trplMomI
+ mp_p3_3mom_cat3_in = mp_p3_cat3_in .and. config_p3_trplMomI
+ mp_p3_lf_in        = mp_p3_in      .and. config_p3_liqfrac
+ mp_p3_lf_cat2_in   = mp_p3_cat2_in .and. config_p3_liqfrac
+ mp_p3_lf_cat3_in   = mp_p3_cat3_in .and. config_p3_liqfrac
+ mp_p3_bl_mynn_in   = mp_p3_in      .and. bl_mynn_in
+
+ if(mp_p3_in) then
+    call mpas_log_write('    mp_p3_3mom_in     = $l', logicArgs=(/mp_p3_3mom_in/))
+    call mpas_log_write('    mp_p3_3mom_cat2_in= $l', logicArgs=(/mp_p3_3mom_cat2_in/))
+    call mpas_log_write('    mp_p3_3mom_cat3_in= $l', logicArgs=(/mp_p3_3mom_cat3_in/))
+    call mpas_log_write('    mp_p3_lf_in       = $l', logicArgs=(/mp_p3_lf_in/))
+    call mpas_log_write('    mp_p3_lf_cat2_in  = $l', logicArgs=(/mp_p3_lf_cat2_in/))
+    call mpas_log_write('    mp_p3_lf_cat3_in  = $l', logicArgs=(/mp_p3_lf_cat3_in/))
+    call mpas_log_write('    mp_p3_bl_mynn_in  = $l', logicArgs=(/mp_p3_bl_mynn_in/))
+    call mpas_log_write('')
+ endif
 
 !--- initialization of all packages for parameterizations of land surface processes:
 

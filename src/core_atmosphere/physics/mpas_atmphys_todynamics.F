@@ -451,12 +451,22 @@
 
     cu_select: select case(trim(convection_scheme))
        case('cu_kain_fritsch')
+          if(trim(microp_scheme) == 'mp_p3' .and. index_qs < 1) then
+             !P3 without MYNN has no qs scalar (package mp_p3 does not allocate qs), so there is no
+             !target for the Kain-Fritsch snow tendency:
+             do i = 1, nCellsSolve
+             do k = 1, nVertLevels
+                tend_scalars(index_qr,k,i) = tend_scalars(index_qr,k,i) + rqrcuten(k,i)*mass(k,i)
+             enddo
+             enddo
+          else
           do i = 1, nCellsSolve
           do k = 1, nVertLevels
              tend_scalars(index_qr,k,i) = tend_scalars(index_qr,k,i) + rqrcuten(k,i)*mass(k,i)
              tend_scalars(index_qs,k,i) = tend_scalars(index_qs,k,i) + rqscuten(k,i)*mass(k,i)
           enddo
           enddo
+          endif
 
        case('cu_tiedtke','cu_ntiedtke')
           if(rk_step == 1 .and. dynamics_substep == 1) then
