@@ -23,6 +23,7 @@
  use mpas_atm_dimensions
 
  use mpas_atmphys_constants, only: R_d,R_v,degrad
+ use mpas_atmphys_p3_pblmix, only: p3pbl_add_tend
  use mpas_timer, only: mpas_timer_start, mpas_timer_stop
 
  implicit none
@@ -264,6 +265,10 @@
               tend_th,tend_rtheta_physics,tend_scalars,tend_ru_physics,tend_u_phys,      &
               exchange_halo_group)
 
+!mp_p3: PBL tendencies of the P3 prognostic scalars:
+ if(trim(microp_scheme) == 'mp_p3' .and. pbl_scheme .ne. 'off') &
+    call p3pbl_add_tend(configs,state,tend_physics,mass,tend_scalars,nCellsSolve,nVertLevels)
+
 !clean up any pointers that were allocated with zero size before the call to physics_get_tend_work:
  if(size(rucuten) == 0 ) deallocate(rucuten )
  if(size(rvcuten) == 0 ) deallocate(rvcuten )
@@ -405,6 +410,17 @@
     enddo
     enddo
 
+    if(trim(microp_scheme) == 'mp_p3') then
+       !P3 has no bulk qi, qs and ni scalars: the PBL tendencies of the P3 scalars (rp3blten) are added
+       !in physics_get_tend (p3pbl_add_tend) instead of rqiblten, rqsblten and rniblten:
+       do i = 1, nCellsSolve
+       do k = 1, nVertLevels
+          tend_th(k,i) = tend_th(k,i) + rthblten(k,i)*mass(k,i)
+          tend_scalars(index_qv,k,i) = tend_scalars(index_qv,k,i) + rqvblten(k,i)*mass(k,i)
+          tend_scalars(index_qc,k,i) = tend_scalars(index_qc,k,i) + rqcblten(k,i)*mass(k,i)
+       enddo
+       enddo
+    else
     do i = 1, nCellsSolve
     do k = 1, nVertLevels
        tend_th(k,i) = tend_th(k,i) + rthblten(k,i)*mass(k,i)
@@ -413,15 +429,18 @@
        tend_scalars(index_qi,k,i) = tend_scalars(index_qi,k,i) + rqiblten(k,i)*mass(k,i)
     enddo
     enddo
+    endif
 
     pbl_select: select case(trim(pbl_scheme))
        case('bl_mynn')
+          if(trim(microp_scheme) /= 'mp_p3') then
           do i = 1, nCellsSolve
           do k = 1, nVertLevels
              tend_scalars(index_qs,k,i) = tend_scalars(index_qs,k,i) + rqsblten(k,i)*mass(k,i)
              tend_scalars(index_ni,k,i) = tend_scalars(index_ni,k,i) + rniblten(k,i)*mass(k,i)
           enddo
           enddo
+          endif
 
           if(trim(microp_scheme) == 'mp_thompson_aerosols' .or. trim(microp_scheme) == 'mp_p3') then
              do i = 1, nCellsSolve
@@ -440,6 +459,17 @@
 
 !add coupled tendencies due to convection:
  if(convection_scheme .ne. 'off') then
+    if(trim(microp_scheme) == 'mp_p3') then
+       !P3 has no bulk qi scalar. The coupling of the convective ice tendency (rqicuten) with the P3
+       !ice categories is not implemented yet, so rqicuten is not applied:
+       do i = 1, nCellsSolve
+       do k = 1, nVertLevels
+          tend_th(k,i) = tend_th(k,i) + rthcuten(k,i)*mass(k,i)
+          tend_scalars(index_qv,k,i) = tend_scalars(index_qv,k,i) + rqvcuten(k,i)*mass(k,i)
+          tend_scalars(index_qc,k,i) = tend_scalars(index_qc,k,i) + rqccuten(k,i)*mass(k,i)
+       enddo
+       enddo
+    else
     do i = 1, nCellsSolve
     do k = 1, nVertLevels
        tend_th(k,i) = tend_th(k,i) + rthcuten(k,i)*mass(k,i)
@@ -448,12 +478,13 @@
        tend_scalars(index_qi,k,i) = tend_scalars(index_qi,k,i) + rqicuten(k,i)*mass(k,i)
     enddo
     enddo
+    endif
 
     cu_select: select case(trim(convection_scheme))
        case('cu_kain_fritsch')
           if(trim(microp_scheme) == 'mp_p3' .and. index_qs < 1) then
-             !P3 without MYNN has no qs scalar (package mp_p3 does not allocate qs), so there is no
-             !target for the Kain-Fritsch snow tendency:
+             !P3 has no qs scalar, so there is no target for the Kain-Fritsch snow tendency (the coupling
+             !of convective ice and snow with the P3 ice categories is not implemented yet):
              do i = 1, nCellsSolve
              do k = 1, nVertLevels
                 tend_scalars(index_qr,k,i) = tend_scalars(index_qr,k,i) + rqrcuten(k,i)*mass(k,i)

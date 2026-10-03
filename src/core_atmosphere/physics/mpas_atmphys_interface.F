@@ -23,6 +23,7 @@
  use mpas_atmphys_vars
  use mpas_timer, only: mpas_timer_start, mpas_timer_stop
  use mpas_atmphys_utilities, only: physics_error_fatal
+ use mpas_atmphys_p3_pblmix, only: allocate_p3pbl,deallocate_p3pbl,p3pbl_from_MPAS
  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 
  implicit none
@@ -33,7 +34,8 @@
           post_microphysics, &
           MPAS_to_physics,           &
           microphysics_from_MPAS,    &
-          microphysics_to_MPAS
+          microphysics_to_MPAS,      &
+          p3_allocate_work
 
 !Interface for conversion between variables used in the MPAS dynamical core and variables needed in the
 !physics parameterizations.
@@ -81,29 +83,63 @@
 ! * changed microphysics update such that the microphsyics tendency is ignored above level mp_top_level
 !   Bill Skamarock / 2025/10/17 
 
-!P3 does not allocate the bulk snow and graupel scalars (qs is allocated only with MYNN, via bl_mynn_in; qg
-!never). Where shared code reads qs/qg for mp_p3, the pointers are redirected to this all-zero field instead
-!of scalars(-1,:,:):
- real(kind=RKIND),dimension(:,:),allocatable,target:: p3_zero_qsqg
+!P3 predicts its own ice categories (p3_* scalars) and does not allocate the bulk qi, qs, qg and ni scalars.
+!Where code shared with the other schemes reads qi/qs/qg/ni for mp_p3, the pointers are redirected to these
+!fields instead of scalars(-1,:,:): an all-zero field for qs and qg, and the sums over the P3 ice categories
+!of the total ice mass (p3_qit*) and number (p3_qni*) for qi and ni. They are allocated once in
+!p3_allocate_work (called from physics_init, outside OpenMP regions) and are never written back to scalars.
+ real(kind=RKIND),dimension(:,:),allocatable,target:: p3_zero_qsqg,p3_qi_sum,p3_ni_sum
 
  contains
 
 !=================================================================================================================
- subroutine p3_set_zero_qsqg(scalars)
+ subroutine p3_allocate_work(state)
 !=================================================================================================================
-!allocates (or resizes) the all-zero field used in place of the unallocated qs and qg scalars with mp_p3.
+!allocates the mp_p3 work fields p3_zero_qsqg, p3_qi_sum and p3_ni_sum (same shape as scalars(n,:,:)).
+ type(mpas_pool_type),intent(in):: state
+ real(kind=RKIND),dimension(:,:,:),pointer:: scalars
+
+ call mpas_pool_get_array(state,'scalars',scalars,1)
+ if(.not. allocated(p3_zero_qsqg)) allocate(p3_zero_qsqg(size(scalars,2),size(scalars,3)))
+ if(.not. allocated(p3_qi_sum)   ) allocate(p3_qi_sum(size(scalars,2),size(scalars,3))   )
+ if(.not. allocated(p3_ni_sum)   ) allocate(p3_ni_sum(size(scalars,2),size(scalars,3))   )
+ p3_zero_qsqg(:,:) = 0._RKIND
+ p3_qi_sum(:,:)    = 0._RKIND
+ p3_ni_sum(:,:)    = 0._RKIND
+
+ end subroutine p3_allocate_work
+
+!=================================================================================================================
+ subroutine p3_sum_ice(state,scalars,its,ite)
+!=================================================================================================================
+!sets p3_qi_sum and p3_ni_sum to the sums over the P3 ice categories of p3_qit and p3_qni.
+ type(mpas_pool_type),intent(in):: state
+ integer,intent(in):: its,ite
  real(kind=RKIND),intent(in),dimension(:,:,:):: scalars
 
- if(allocated(p3_zero_qsqg)) then
-    if(size(p3_zero_qsqg,1) /= size(scalars,2) .or. size(p3_zero_qsqg,2) /= size(scalars,3)) &
-       deallocate(p3_zero_qsqg)
- endif
- if(.not. allocated(p3_zero_qsqg)) then
-    allocate(p3_zero_qsqg(size(scalars,2),size(scalars,3)))
-    p3_zero_qsqg(:,:) = 0._RKIND
- endif
+ integer,pointer:: index_p3_qit,index_p3_qni,index_p3_qir
+ integer:: c,i,k,nCat
 
- end subroutine p3_set_zero_qsqg
+ if(.not. allocated(p3_qi_sum) .or. .not. allocated(p3_ni_sum)) &
+    call physics_error_fatal('p3_sum_ice: P3 work fields not allocated (p3_allocate_work not called)')
+
+ call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
+ call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
+ call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
+ nCat = index_p3_qir - index_p3_qni
+
+ do i = its,ite
+ do k = kts,kte
+    p3_qi_sum(k,i) = 0._RKIND
+    p3_ni_sum(k,i) = 0._RKIND
+    do c = 1, nCat
+       p3_qi_sum(k,i) = p3_qi_sum(k,i) + max(0._RKIND,scalars(index_p3_qit+c-1,k,i))
+       p3_ni_sum(k,i) = p3_ni_sum(k,i) + max(0._RKIND,scalars(index_p3_qni+c-1,k,i))
+    enddo
+ enddo
+ enddo
+
+ end subroutine p3_sum_ice
 
 
 !=================================================================================================================
@@ -189,6 +225,9 @@
  if(.not.allocated(pres2_hydd_p)) allocate(pres2_hydd_p(ims:ime,kms:kme,jms:jme))
  if(.not.allocated(znu_hyd_p)   ) allocate(znu_hyd_p(ims:ime,kms:kme,jms:jme)   )
  
+ !P3 prognostic scalars mixed by the YSU or MYNN PBL schemes (mp_p3 only; filled in MPAS_to_physics):
+ call allocate_p3pbl(configs)
+
  end subroutine allocate_forall_physics
 
 !=================================================================================================================
@@ -267,6 +306,8 @@
  if(allocated(pres2_hydd_p)) deallocate(pres2_hydd_p)
  if(allocated(znu_hyd_p)   ) deallocate(znu_hyd_p   )
  
+ call deallocate_p3pbl
+
  end subroutine deallocate_forall_physics
 
 !=================================================================================================================
@@ -358,10 +399,13 @@
  qs => scalars(index_qs,:,:)
  qg => scalars(index_qg,:,:)
  if(trim(microp_scheme) == 'mp_p3') then
-    !qs (without MYNN) and qg are not allocated with mp_p3: use zeros for qs_p and qg_p.
-    call p3_set_zero_qsqg(scalars)
-    if(index_qs < 1) qs => p3_zero_qsqg
-    if(index_qg < 1) qg => p3_zero_qsqg
+    !qi, qs and qg are not allocated with mp_p3: qi_p is the sum over the P3 ice categories of the total
+    !ice mass, and qs_p and qg_p are zero. The P3 scalars mixed by the PBL are copied to p3mix_p.
+    call p3_sum_ice(state,scalars,its,ite)
+    qi => p3_qi_sum
+    qs => p3_zero_qsqg
+    qg => p3_zero_qsqg
+    call p3pbl_from_MPAS(configs,state,scalars,its,ite)
  endif
 
  call mpas_pool_get_array(diag_physics,'plrad',plrad)
@@ -917,27 +961,15 @@ end subroutine pre_microphysics
            p3dbg_banner_printed = .true.
         end if! MPAS bulk-compatible packing of bulk hydrometeors + number concentrations
 ! so downstream MPAS diagnostics and radiation coupling see the same fields as Thompson.
-! qs is allocated only with MYNN and qg never; otherwise read zeros (also used by the qs/qg
-! tendency diagnostics below).
-call mpas_pool_get_dimension(state,'index_qi',index_qi)
-call mpas_pool_get_dimension(state,'index_qs',index_qs)
-call mpas_pool_get_dimension(state,'index_qg',index_qg)
-call p3_set_zero_qsqg(scalars)
-qi => scalars(index_qi,:,:)
-if (index_qs > 0) then
-   qs => scalars(index_qs,:,:)
-else
-   qs => p3_zero_qsqg
-end if
-if (index_qg > 0) then
-   qg => scalars(index_qg,:,:)
-else
-   qg => p3_zero_qsqg
-end if
+! qi, qs, qg and ni are not allocated with mp_p3: qi and ni are the sums over the P3 ice categories
+! of p3_qit and p3_qni, and qs and qg are zero (also used by the tendency diagnostics below).
+call p3_sum_ice(state,scalars,its,ite)
+qi => p3_qi_sum
+qs => p3_zero_qsqg
+qg => p3_zero_qsqg
+ni => p3_ni_sum
 
-call mpas_pool_get_dimension(state,'index_ni',index_ni)
 call mpas_pool_get_dimension(state,'index_nr',index_nr)
-ni => scalars(index_ni,:,:)
 nr => scalars(index_nr,:,:)
 
 do j = jts, jte
@@ -1018,7 +1050,7 @@ enddo
            call mpas_pool_get_dimension(state,'index_p3_qib',index_p3_qib)
 
            nScalarTot  = size(scalars,1)
-           nCat_layout = index_p3_qni - index_p3_qit
+           nCat_layout = index_p3_qir - index_p3_qni   ! p3_qit* are in the moist group
 
            if (nCat_layout < 1 .or. nCat_layout > 3) then
               write(dbgmsg,'(A,I0)') 'P3DBG_FATAL: invalid derived nCat_layout=', nCat_layout
@@ -1527,35 +1559,21 @@ end if
    call mpas_pool_get_config(configs,'config_p3_liqfrac' ,p3_liqfrac )
 
 ! Bulk hydrometeors + number concentrations (match MPAS bulk scalar layout)
-! qs is allocated only with MYNN and qg never; the zero field is never written.
-call mpas_pool_get_dimension(state,'index_qi',index_qi)
-call mpas_pool_get_dimension(state,'index_qs',index_qs)
-call mpas_pool_get_dimension(state,'index_qg',index_qg)
-call p3_set_zero_qsqg(scalars)
-qi => scalars(index_qi,:,:)
-if (index_qs > 0) then
-   qs => scalars(index_qs,:,:)
-else
-   qs => p3_zero_qsqg
-end if
-if (index_qg > 0) then
-   qg => scalars(index_qg,:,:)
-else
-   qg => p3_zero_qsqg
-end if
+! qi, qs, qg and ni are not allocated with mp_p3 (the P3 categories were written to scalars in the driver):
+! qi and ni point to the updated sums over the P3 ice categories and qs and qg to zero, for the tendency
+! diagnostics below. Nothing is written to these fields.
+call p3_sum_ice(state,scalars,its,ite)
+qi => p3_qi_sum
+qs => p3_zero_qsqg
+qg => p3_zero_qsqg
+ni => p3_ni_sum
 
-call mpas_pool_get_dimension(state,'index_ni',index_ni)
 call mpas_pool_get_dimension(state,'index_nr',index_nr)
-ni => scalars(index_ni,:,:)
 nr => scalars(index_nr,:,:)
 
 do j = jts,jte
 do k = kts,kte
 do i = its,ite
-   qi(k,i) = max(0._RKIND, qi_p(i,k,j))
-   if (index_qs > 0) qs(k,i) = max(0._RKIND, qs_p(i,k,j))
-   if (index_qg > 0) qg(k,i) = max(0._RKIND, qg_p(i,k,j))
-   ni(k,i) = max(0._RKIND, ni_p(i,k,j))
    nr(k,i) = max(0._RKIND, nr_p(i,k,j))
 end do
 end do

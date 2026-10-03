@@ -28,6 +28,8 @@
                      description="A constant value of 21"/>
                 <dim name="R3"                 definition="3"
                      description="The dimensionality of vectors in $\Re^3$"/>
+                <dim name="nP3pblmax"          definition="18"
+                     description="Maximum number of P3 prognostic scalars mixed by the PBL (6 per ice category, 3 categories)"/>
                 <dim name="nVertLevels"
                      description="The number of atmospheric layers"/>
                 <dim name="nVertLevelsP1"      definition="nVertLevels+1"
@@ -477,13 +479,16 @@
                 <package name="mp_p3_lf_in" description="P3 predicted liquid fraction (config_p3_liqfrac): category-1 p3_qli active."/>
                 <package name="mp_p3_lf_cat2_in" description="P3 predicted liquid fraction with nCat &gt;= 2: category-2 p3_qli2 active."/>
                 <package name="mp_p3_lf_cat3_in" description="P3 predicted liquid fraction with nCat &gt;= 3: category-3 p3_qli3 active."/>
-                <package name="mp_p3_bl_mynn_in" description="P3 with MYNN PBL: qs is a state scalar (bl_mynn_in), so lbc_qs and qs_amb must be allocated to match."/>
+                <package name="mp_p3_pbl_in" description="P3 with the YSU or MYNN PBL: storage for the PBL tendencies of the P3 prognostic scalars (rp3blten)."/>
                 <package name="mp_wsm6_in" description="parameterization of WSM6 cloud microphysics."/>
                 <package name="cu_grell_freitas_in" description="parameterization of Grell-Freitas convection."/>
                 <package name="cu_kain_fritsch_in" description="parameterization of Kain-Fritsch convection."/>
                 <package name="cu_ntiedtke_in" description="parameterization of Tiedtke convection."/>
                 <package name="bl_ysu_in" description="parameterization of YSU Planetary Boundary Layer."/>
                 <package name="bl_mynn_in" description="parameterization of MYNN Planetary Boundary Layer."/>
+                <package name="bl_ysu_nop3_in" description="YSU PBL without P3 microphysics (bulk qi is not a scalar with P3)."/>
+                <package name="bl_mynn_nop3_in" description="MYNN PBL without P3 microphysics (bulk qi, qs, ni are not scalars with P3)."/>
+                <package name="cu_ntiedtke_nop3_in" description="Tiedtke convection without P3 microphysics (bulk qi is not a scalar with P3)."/>
                 <package name="sf_noahmp_in" description="parameterization of NOAH-MP land surface scheme."/>
 
                 <package name="iau" description="Incremental Analysis Update"/>
@@ -1723,19 +1728,29 @@
 
                         <var name="qi" array_group="moist" units="kg kg^{-1}"
                              description="Ice mixing ratio"
-                             packages="bl_mynn_in;bl_ysu_in;cu_ntiedtke_in;mp_thompson_in;mp_thompson_aers_in;mp_p3_in;mp_wsm6_in"/>
+                             packages="bl_mynn_nop3_in;bl_ysu_nop3_in;cu_ntiedtke_nop3_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
 
                         <var name="qs" array_group="moist" units="kg kg^{-1}"
                              description="Snow mixing ratio"
-                             packages="bl_mynn_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
+                             packages="bl_mynn_nop3_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
 
                         <var name="qg" array_group="moist" units="kg kg^{-1}"
                              description="Graupel mixing ratio"
                              packages="mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
 
+                        <var name="p3_qit"  array_group="moist" units="kg kg^{-1}"
+                             description="P3 total ice mixing ratio (cat 1)"
+                             packages="mp_p3_in"/>
+                        <var name="p3_qit2" array_group="moist" units="kg kg^{-1}"
+                             description="P3 total ice mixing ratio (cat 2)"
+                             packages="mp_p3_cat2_in"/>
+                        <var name="p3_qit3" array_group="moist" units="kg kg^{-1}"
+                             description="P3 total ice mixing ratio (cat 3)"
+                             packages="mp_p3_cat3_in"/>
+
                         <var name="ni" array_group="number" units="nb kg^{-1}"
                              description="Cloud ice number concentration"
-                             packages="bl_mynn_in;mp_thompson_in;mp_thompson_aers_in;mp_p3_in"/>
+                             packages="bl_mynn_nop3_in;mp_thompson_in;mp_thompson_aers_in"/>
 
                         <var name="nr" array_group="number" units="nb kg^{-1}"
                              description="Rain number concentration"
@@ -1755,17 +1770,9 @@
 
 
                         <!-- ===================== P3 multi-category prognostic state (max 3 categories) ===================== -->
-                        <!-- NOTE: MPAS scalar indices are assigned in-order; keep each group contiguous so index_p3_* + (cat-1) works. -->
-
-                        <var name="p3_qit"  array_group="number" units="kg kg^{-1}"
-                             description="P3 total ice mixing ratio (cat 1)"
-                             packages="mp_p3_in"/>
-                        <var name="p3_qit2" array_group="number" units="kg kg^{-1}"
-                             description="P3 total ice mixing ratio (cat 2)"
-                             packages="mp_p3_cat2_in"/>
-                        <var name="p3_qit3" array_group="number" units="kg kg^{-1}"
-                             description="P3 total ice mixing ratio (cat 3)"
-                             packages="mp_p3_cat3_in"/>
+                        <!-- NOTE: MPAS scalar indices are assigned in-order; keep each group contiguous so index_p3_* + (cat-1) works.
+                             p3_qit* are in the moist group (placed after qg) so P3 ice mass enters the condensate
+                             loading in the dynamics; the nCat layout is derived from index_p3_qir - index_p3_qni. -->
 
                         <var name="p3_qni"  array_group="number" units="kg^{-1}"
                              description="P3 total ice number mixing ratio (cat 1)"
@@ -2155,19 +2162,29 @@
 
                         <var name="tend_qi" name_in_code="qi" array_group="moist" units="kg m^{-3} s^{-1}"
                              description="Tendency of ice mass per unit volume divided by d(zeta)/dz"
-                             packages="bl_mynn_in;bl_ysu_in;cu_ntiedtke_in;mp_thompson_in;mp_thompson_aers_in;mp_p3_in;mp_wsm6_in"/>
+                             packages="bl_mynn_nop3_in;bl_ysu_nop3_in;cu_ntiedtke_nop3_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
 
                         <var name="tend_qs" name_in_code="qs" array_group="moist" units="kg m^{-3} s^{-1}"
                              description="Tendency of snow mass per unit volume divided by d(zeta)/dz"
-                             packages="bl_mynn_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
+                             packages="bl_mynn_nop3_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
 
                         <var name="tend_qg" name_in_code="qg" array_group="moist" units="kg m^{-3} s^{-1}"
                              description="Tendency of graupel mass per unit volume divided by d(zeta)/dz"
                              packages="mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"/>
 
+                        <var name="tend_p3_qit"  name_in_code="p3_qit"  array_group="moist" units="kg m^{-3} s^{-1}"
+                             description="Tendency of P3 total ice mixing ratio for category 1 multiplied by dry air density divided by d(zeta)/dz"
+                             packages="mp_p3_in"/>
+                        <var name="tend_p3_qit2" name_in_code="p3_qit2" array_group="moist" units="kg m^{-3} s^{-1}"
+                             description="Tendency of P3 total ice mixing ratio for category 2 multiplied by dry air density divided by d(zeta)/dz"
+                             packages="mp_p3_cat2_in"/>
+                        <var name="tend_p3_qit3" name_in_code="p3_qit3" array_group="moist" units="kg m^{-3} s^{-1}"
+                             description="Tendency of P3 total ice mixing ratio for category 3 multiplied by dry air density divided by d(zeta)/dz"
+                             packages="mp_p3_cat3_in"/>
+
                         <var name="tend_ni" name_in_code="ni" array_group="number" units="nb m^{-3} s^{-1}"
                              description="Tendency of cloud ice number concentration multiplied by dry air density divided by d(zeta)/dz"
-                             packages="bl_mynn_in;mp_thompson_in;mp_thompson_aers_in;mp_p3_in"/>
+                             packages="bl_mynn_nop3_in;mp_thompson_in;mp_thompson_aers_in"/>
 
                         <var name="tend_nr" name_in_code="nr" array_group="number" units="nb m^{-3} s^{-1}" 
                              description="Tendency of rain number concentration multiplied by dry air density divided by d(zeta)/dz"
@@ -2186,16 +2203,6 @@
                              packages="mp_thompson_aers_in;mp_p3_in"/>
 
                         <!-- P3 multi-category prognostic tendencies; ordering must match the state scalars array exactly. -->
-                        <var name="tend_p3_qit"  name_in_code="p3_qit"  array_group="number" units="kg m^{-3} s^{-1}"
-                             description="Tendency of P3 total ice mixing ratio for category 1 multiplied by dry air density divided by d(zeta)/dz"
-                             packages="mp_p3_in"/>
-                        <var name="tend_p3_qit2" name_in_code="p3_qit2" array_group="number" units="kg m^{-3} s^{-1}"
-                             description="Tendency of P3 total ice mixing ratio for category 2 multiplied by dry air density divided by d(zeta)/dz"
-                             packages="mp_p3_cat2_in"/>
-                        <var name="tend_p3_qit3" name_in_code="p3_qit3" array_group="number" units="kg m^{-3} s^{-1}"
-                             description="Tendency of P3 total ice mixing ratio for category 3 multiplied by dry air density divided by d(zeta)/dz"
-                             packages="mp_p3_cat3_in"/>
-
                         <var name="tend_p3_qni"  name_in_code="p3_qni"  array_group="number" units="nb m^{-3} s^{-1}"
                              description="Tendency of P3 ice number mixing ratio for category 1 multiplied by dry air density divided by d(zeta)/dz"
                              packages="mp_p3_in"/>
@@ -2296,11 +2303,11 @@
                              units="kg kg^{-1} s^{-1}"
                              description="Lateral boundary tendency of rain water mixing ratio"/>
 
-                        <var name="lbc_qi" name_in_code="qi" array_group="moist"  packages="bl_mynn_in;cu_ntiedtke_in;mp_thompson_in;mp_thompson_aers_in;mp_p3_in;mp_wsm6_in"
+                        <var name="lbc_qi" name_in_code="qi" array_group="moist"  packages="bl_mynn_nop3_in;cu_ntiedtke_nop3_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"
                              units="kg kg^{-1} s^{-1}"
                              description="Lateral boundary tendency of ice mixing ratio"/>
 
-                        <var name="lbc_qs" name_in_code="qs" array_group="moist"  packages="mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in;mp_p3_bl_mynn_in"
+                        <var name="lbc_qs" name_in_code="qs" array_group="moist"  packages="mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"
                              units="kg kg^{-1} s^{-1}"
                              description="Lateral boundary tendency of snow mixing ratio"/>
 
@@ -2308,7 +2315,19 @@
                              units="kg kg^{-1} s^{-1}"
                              description="Lateral boundary tendency of graupel mixing ratio"/>
 
-                        <var name="lbc_ni" name_in_code="ni" array_group="number" packages="bl_mynn_in;mp_thompson_in;mp_thompson_aers_in;mp_p3_in"
+                        <var name="lbc_p3_qit" name_in_code="p3_qit" array_group="moist" packages="mp_p3_in"
+                             units="kg kg^{-1} s^{-1}"
+                             description="Lateral boundary tendency of P3 total ice mixing ratio (cat 1)"/>
+
+                        <var name="lbc_p3_qit2" name_in_code="p3_qit2" array_group="moist" packages="mp_p3_cat2_in"
+                             units="kg kg^{-1} s^{-1}"
+                             description="Lateral boundary tendency of P3 total ice mixing ratio (cat 2)"/>
+
+                        <var name="lbc_p3_qit3" name_in_code="p3_qit3" array_group="moist" packages="mp_p3_cat3_in"
+                             units="kg kg^{-1} s^{-1}"
+                             description="Lateral boundary tendency of P3 total ice mixing ratio (cat 3)"/>
+
+                        <var name="lbc_ni" name_in_code="ni" array_group="number" packages="bl_mynn_nop3_in;mp_thompson_in;mp_thompson_aers_in"
                              units="m^{-3} s^{-1}"
                              description="Lateral boundary tendency of ice number concentration"/>
 
@@ -2327,18 +2346,6 @@
                         <var name="lbc_nwfa" name_in_code="nwfa" array_group="number" packages="mp_thompson_aers_in;mp_p3_in"
                              units="m^{-3} s^{-1}"
                              description="Lateral boundary tendency of water-friendly aerosol number concentration"/>
-                        <var name="lbc_p3_qit" name_in_code="p3_qit" array_group="number" packages="mp_p3_in"
-                             units="kg kg^{-1} s^{-1}"
-                             description="Lateral boundary tendency of P3 total ice mixing ratio (cat 1)"/>
-
-                        <var name="lbc_p3_qit2" name_in_code="p3_qit2" array_group="number" packages="mp_p3_cat2_in"
-                             units="kg kg^{-1} s^{-1}"
-                             description="Lateral boundary tendency of P3 total ice mixing ratio (cat 2)"/>
-
-                        <var name="lbc_p3_qit3" name_in_code="p3_qit3" array_group="number" packages="mp_p3_cat3_in"
-                             units="kg kg^{-1} s^{-1}"
-                             description="Lateral boundary tendency of P3 total ice mixing ratio (cat 3)"/>
-
                         <var name="lbc_p3_qni" name_in_code="p3_qni" array_group="number" packages="mp_p3_in"
                              units="kg^{-1} s^{-1}"
                              description="Lateral boundary tendency of P3 total ice number mixing ratio (cat 1)"/>
@@ -3946,6 +3953,10 @@
                      description="tendency of cloud ice mixing ratio due to pbl processes"
                      packages="bl_mynn_in;bl_ysu_in"/>
 
+                <var name="rp3blten" type="real" dimensions="nP3pblmax nVertLevels nCells Time" units="(P3 scalar units) s^{-1}"
+                     description="tendencies of the P3 prognostic scalars due to pbl processes (order set in mpas_atmphys_p3_pblmix)"
+                     packages="mp_p3_pbl_in"/>
+
                 <var name="rqsblten" type="real" dimensions="nVertLevels nCells Time" units="kg kg^{-1} s^{-1}"
                      description="tendency of snow mixing ratio due to pbl processes"
                      packages="bl_mynn_in"/>
@@ -4268,17 +4279,29 @@
                           units="kg kg^{-1}"
                           description="Rain water mixing ratio increment"/>
 
-                     <var name="qi_amb"  name_in_code="qi" array_group="moist" packages="bl_mynn_in;bl_ysu_in;cu_ntiedtke_in;mp_thompson_in;mp_thompson_aers_in;mp_p3_in;mp_wsm6_in"
+                     <var name="qi_amb"  name_in_code="qi" array_group="moist" packages="bl_mynn_nop3_in;bl_ysu_nop3_in;cu_ntiedtke_nop3_in;mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"
                           units="kg kg^{-1}"
                           description="Ice mixing ratio increment"/>
 
-                     <var name="qs_amb"  name_in_code="qs" array_group="moist" packages="mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in;mp_p3_bl_mynn_in"
+                     <var name="qs_amb"  name_in_code="qs" array_group="moist" packages="mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"
                           units="kg kg^{-1}"
                           description="Snow mixing ratio increment"/>
 
                      <var name="qg_amb"  name_in_code="qg" array_group="moist" packages="mp_thompson_in;mp_thompson_aers_in;mp_wsm6_in"
                           units="kg kg^{-1}"
                           description="Graupel mixing ratio increment"/>
+
+                     <var name="p3_qit_amb"  name_in_code="p3_qit"  array_group="moist" packages="mp_p3_in"
+                          units="kg kg^{-1}"
+                          description="P3 total ice mixing ratio increment (cat 1)"/>
+
+                     <var name="p3_qit2_amb" name_in_code="p3_qit2" array_group="moist" packages="mp_p3_cat2_in"
+                          units="kg kg^{-1}"
+                          description="P3 total ice mixing ratio increment (cat 2)"/>
+
+                     <var name="p3_qit3_amb" name_in_code="p3_qit3" array_group="moist" packages="mp_p3_cat3_in"
+                          units="kg kg^{-1}"
+                          description="P3 total ice mixing ratio increment (cat 3)"/>
                 </var_array>
          </var_struct>
 

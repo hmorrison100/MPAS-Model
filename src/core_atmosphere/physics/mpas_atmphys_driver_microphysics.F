@@ -488,7 +488,8 @@ end subroutine deallocate_microphysics
        call mpas_pool_get_dimension(state,'index_p3_qir', idx_qir1)
        call mpas_pool_get_dimension(state,'index_p3_qib', idx_qib1)
 
-       nCat_layout = idx_qni1 - idx_qit1
+       ! p3_qit* are in the moist group, apart from the other P3 scalars: use the qni -> qir spacing.
+       nCat_layout = idx_qir1 - idx_qni1
 
        if (nCat_layout < 1 .or. nCat_layout > 3) then
           write(mpas_err_message,'(A,I0,A,4(A,I0))') 'ERROR: Derived P3 nCat_layout=', nCat_layout, &
@@ -774,7 +775,7 @@ call mpas_pool_get_dimension(state,'index_p3_qit', idx_qit)
 call mpas_pool_get_dimension(state,'index_p3_qni', idx_qni)
 call mpas_pool_get_dimension(state,'index_p3_qir', idx_qir)
 call mpas_pool_get_dimension(state,'index_p3_qib', idx_qib)
-nCat_layout_drv = idx_qni - idx_qit
+nCat_layout_drv = idx_qir - idx_qni   ! p3_qit* are in the moist group, apart from the other P3 scalars
         ! MPAS bulk-compatible + memory fix: read/write P3 category prognostics directly from state%scalars
         call mpas_pool_get_array(state,'scalars',scalars,time_lev)
         if (.not. associated(scalars)) then
@@ -878,26 +879,21 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                 t1d(k)  = th1d(k) * pi1d(k)
 
                 !--------------------------------------------------------------------------------
-                ! MPAS bulk-compatible cold-start:
-                ! If MPAS bulk ice (qi_p/ni_p) is present but P3 category tracers in scalars are
-                ! missing/zero (typical for IC files), seed category-1 and zero the rest.
-                ! Also sanitize any non-finite/negative category fields to prevent NaN propagation.
+                ! Sanitize any non-finite/negative category fields to prevent NaN propagation.
+                ! (There is no bulk qi/ni with P3: qi_p and ni_p are the sums over the categories,
+                ! so the former per-call seeding of category 1 from qi_p/ni_p has been removed.)
                 !--------------------------------------------------------------------------------
                 block
-                   real(kind=RKIND) :: sum_qit_cat, sum_qni_cat, vtmp, qi_seed
+                   real(kind=RKIND) :: vtmp
                    integer :: cc
-                   sum_qit_cat = 0.0_RKIND
-                   sum_qni_cat = 0.0_RKIND
                    do cc = 1, nCat_layout_drv
                       vtmp = scalars(idx_qit + (cc-1), k, i)
                       if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
                       scalars(idx_qit + (cc-1), k, i) = vtmp
-                      sum_qit_cat = sum_qit_cat + vtmp
 
                       vtmp = scalars(idx_qni + (cc-1), k, i)
                       if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
                       scalars(idx_qni + (cc-1), k, i) = vtmp
-                      sum_qni_cat = sum_qni_cat + vtmp
 
                       vtmp = scalars(idx_qir + (cc-1), k, i)
                       if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
@@ -920,23 +916,6 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                          scalars(idx_qli + (cc-1), k, i) = vtmp
                       end if
                    end do
-
-                   qi_seed = 0.0_RKIND
-                   if (ieee_is_finite(qi_p(i,k,j)) .and. qi_p(i,k,j) > 0._RKIND) qi_seed = qi_seed + qi_p(i,k,j)
-                   if (ieee_is_finite(qs_p(i,k,j)) .and. qs_p(i,k,j) > 0._RKIND) qi_seed = qi_seed + qs_p(i,k,j)
-                   if (ieee_is_finite(qg_p(i,k,j)) .and. qg_p(i,k,j) > 0._RKIND) qi_seed = qi_seed + qg_p(i,k,j)
-                   if (sum_qit_cat <= 1.0e-30_RKIND .and. qi_seed > 0._RKIND) then
-                      scalars(idx_qit, k, i) = qi_seed
-                      do cc = 2, nCat_layout_drv
-                         scalars(idx_qit + (cc-1), k, i) = 0._RKIND
-                      end do
-                   end if
-                   if (sum_qni_cat <= 1.0e-30_RKIND .and. ieee_is_finite(ni_p(i,k,j)) .and. ni_p(i,k,j) > 0._RKIND) then
-                      scalars(idx_qni, k, i) = ni_p(i,k,j)
-                      do cc = 2, nCat_layout_drv
-                         scalars(idx_qni + (cc-1), k, i) = 0._RKIND
-                      end do
-                   end if
                 end block
 
                 ! Default: single-category ice for MPAS wrapper

@@ -359,20 +359,22 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
  qv => scalars(index_qv,:,:)
  qc => scalars(index_qc,:,:)
  qr => scalars(index_qr,:,:)
- qi => scalars(index_qi,:,:)
- ! qs is a P3 state scalar only with MYNN (bl_mynn_in), and qg never (index = -1 when not allocated).
- nullify(qs,qg)
+ ! The bulk qi, qs, qg and ni scalars are not allocated with P3 (index = -1); they are used below only if present.
+ nullify(qi,qs,qg,ni)
+ if (index_qi > 0) qi => scalars(index_qi,:,:)
  if (index_qs > 0) qs => scalars(index_qs,:,:)
  if (index_qg > 0) qg => scalars(index_qg,:,:)
+ if (index_ni > 0) ni => scalars(index_ni,:,:)
  nc => scalars(index_nc,:,:)
  nr => scalars(index_nr,:,:)
- ni => scalars(index_ni,:,:)
 
  ! Sanitize any missing/uninitialized (NaN/Inf) or negative values to zero
  where (.not. ieee_is_finite(qv) .or. qv < 0._RKIND .or. qv > 1._RKIND) qv = 0._RKIND
  where (.not. ieee_is_finite(qc) .or. qc < 0._RKIND .or. qc > 0.2_RKIND) qc = 0._RKIND
  where (.not. ieee_is_finite(qr) .or. qr < 0._RKIND .or. qr > 0.2_RKIND) qr = 0._RKIND
- where (.not. ieee_is_finite(qi) .or. qi < 0._RKIND .or. qi > 0.2_RKIND) qi = 0._RKIND
+ if (associated(qi)) then
+    where (.not. ieee_is_finite(qi) .or. qi < 0._RKIND .or. qi > 0.2_RKIND) qi = 0._RKIND
+ end if
  if (associated(qs)) then
     where (.not. ieee_is_finite(qs) .or. qs < 0._RKIND .or. qs > 0.2_RKIND) qs = 0._RKIND
  end if
@@ -381,7 +383,9 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
  end if
  where (.not. ieee_is_finite(nc) .or. nc < 0._RKIND .or. nc > 1.0e12_RKIND) nc = 0._RKIND
  where (.not. ieee_is_finite(nr) .or. nr < 0._RKIND .or. nr > 1.0e12_RKIND) nr = 0._RKIND
- where (.not. ieee_is_finite(ni) .or. ni < 0._RKIND .or. ni > 1.0e12_RKIND) ni = 0._RKIND
+ if (associated(ni)) then
+    where (.not. ieee_is_finite(ni) .or. ni < 0._RKIND .or. ni > 1.0e12_RKIND) ni = 0._RKIND
+ end if
  where (.not. ieee_is_finite(nwfa) .or. nwfa < 0._RKIND .or. nwfa > 1.0e12_RKIND) nwfa = 0._RKIND
  where (.not. ieee_is_finite(nifa) .or. nifa < 0._RKIND .or. nifa > 1.0e12_RKIND) nifa = 0._RKIND
 
@@ -402,7 +406,7 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
       .not.associated(index_p3_qzi) .or. .not.associated(index_p3_qli)) then
      call physics_error_fatal('mpas_atmphys_init_microphysics init_p3_aerosols_forMPAS: missing P3 scalar indices in state pool')
   endif
-  nCat_reg = max(1, index_p3_qni - index_p3_qit)
+  nCat_reg = max(1, index_p3_qir - index_p3_qni)   ! p3_qit* are in the moist group, apart from qni/qir/qib
   if (index_p3_qit + nCat_reg - 1 > size(scalars,1)) nCat_reg = 1
   if(dminfo % my_proc_id == IO_NODE) then
      call mpas_log_write('--- init_p3_aerosols_forMPAS: P3 nCat_layout = $i', intArgs=(/nCat_reg/))
@@ -443,12 +447,14 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
        if (index_p3_qli > 0) scalars(index_p3_qli+c,:,:) = 0.0_RKIND
     end do
 
-    ! Seed category-1 P3 ice mass/number from bulk MPAS fields for cold starts.
-    scalars(index_p3_qit,:,:) = qi(:,:)
+    ! Seed category-1 P3 ice mass/number from bulk MPAS fields for cold starts, if present. With P3
+    ! the bulk qi/qs/qg/ni scalars are not allocated, so ice in initial-condition files is not read
+    ! and P3 ice starts from zero (known limitation, to be addressed).
+    if (associated(qi)) scalars(index_p3_qit,:,:) = scalars(index_p3_qit,:,:) + qi(:,:)
     if (associated(qs)) scalars(index_p3_qit,:,:) = scalars(index_p3_qit,:,:) + qs(:,:)
     if (associated(qg)) scalars(index_p3_qit,:,:) = scalars(index_p3_qit,:,:) + qg(:,:)
     scalars(index_p3_qit,:,:) = max(0._RKIND, scalars(index_p3_qit,:,:))
-    scalars(index_p3_qni,:,:) = max(0._RKIND, ni(:,:))
+    if (associated(ni)) scalars(index_p3_qni,:,:) = max(0._RKIND, ni(:,:))
  end if
 
  !-----------------------------------------------------------------------------------------------
