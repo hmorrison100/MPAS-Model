@@ -18,6 +18,7 @@ set(ATMOSPHERE_CORE_PHYSICS_SOURCES
     mpas_atmphys_lsm_noahinit.F
     mpas_atmphys_manager.F
     mpas_atmphys_o3climatology.F
+    mpas_atmphys_p3_cumix.F
     mpas_atmphys_p3_pblmix.F
     mpas_atmphys_rrtmg_lwinit.F
     mpas_atmphys_rrtmg_swinit.F

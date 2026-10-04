@@ -2639,6 +2639,22 @@
                      units="-"
                      description="Directory containing P3 lookup tables"/>
 
+                <nml_option name="config_p3_cu_detrain" type="logical" default_value="true" in_defaults="false"
+                     units="-"
+                     description="Add the condensate detrained by the convection scheme to P3: ice (rqicuten, plus rqscuten for Kain-Fritsch) to p3_qit and p3_qni, and the number of the detrained cloud water (nc) and Kain-Fritsch rain (nr). If false, the detrained ice is not applied and no number is added"/>
+
+                <nml_option name="config_p3_cu_ri" type="real" default_value="125.e-6" in_defaults="false"
+                     units="m"
+                     description="Mean-volume radius of the ice particles detrained by the convection scheme, used for the P3 ice number tendency"/>
+
+                <nml_option name="config_p3_cu_rc" type="real" default_value="10.e-6" in_defaults="false"
+                     units="m"
+                     description="Radius of the cloud droplets detrained by the convection scheme, used for the nc tendency (if config_p3_predictNc)"/>
+
+                <nml_option name="config_p3_cu_rr" type="real" default_value="0.25e-3" in_defaults="false"
+                     units="m"
+                     description="Mean-volume radius of the rain drops detrained by the Kain-Fritsch convection scheme, used for the nr tendency"/>
+
                 <nml_option name="config_convection_scheme" type="character" default_value="suite" in_defaults="false"
                      units="-"
                      description="configuration for convection schemes"

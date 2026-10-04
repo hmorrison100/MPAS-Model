@@ -45,6 +45,7 @@ OBJS = \
 	mpas_atmphys_lsm_shared.o          \
 	mpas_atmphys_manager.o             \
 	mpas_atmphys_o3climatology.o       \
+	mpas_atmphys_p3_cumix.o            \
 	mpas_atmphys_p3_pblmix.o           \
 	mpas_atmphys_packages.o            \
 	mpas_atmphys_rrtmg_lwinit.o        \
@@ -237,11 +238,15 @@ mpas_atmphys_sfc_diagnostics.o: \
 	mpas_atmphys_constants.o \
 	mpas_atmphys_vars.o
 
+mpas_atmphys_p3_cumix.o: \
+	mpas_atmphys_utilities.o
+
 mpas_atmphys_p3_pblmix.o: \
 	mpas_atmphys_vars.o
 
 mpas_atmphys_todynamics.o: \
 	mpas_atmphys_constants.o \
+	mpas_atmphys_p3_cumix.o \
 	mpas_atmphys_p3_pblmix.o \
 	mpas_atmphys_vars.o
 

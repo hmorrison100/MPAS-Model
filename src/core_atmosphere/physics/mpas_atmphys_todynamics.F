@@ -24,6 +24,7 @@
 
  use mpas_atmphys_constants, only: R_d,R_v,degrad
  use mpas_atmphys_p3_pblmix, only: p3pbl_add_tend
+ use mpas_atmphys_p3_cumix, only: p3cu_add_tend
  use mpas_timer, only: mpas_timer_start, mpas_timer_stop
 
  implicit none
@@ -269,6 +270,10 @@
  if(trim(microp_scheme) == 'mp_p3' .and. pbl_scheme .ne. 'off') &
     call p3pbl_add_tend(configs,state,tend_physics,mass,tend_scalars,nCellsSolve,nVertLevels)
 
+!mp_p3: convective detrainment of cloud water number and ice into the P3 prognostic scalars:
+ if(trim(microp_scheme) == 'mp_p3' .and. convection_scheme .ne. 'off') &
+    call p3cu_add_tend(configs,state,tend_physics,mass,tend_scalars,nCellsSolve,nVertLevels)
+
 !clean up any pointers that were allocated with zero size before the call to physics_get_tend_work:
  if(size(rucuten) == 0 ) deallocate(rucuten )
  if(size(rvcuten) == 0 ) deallocate(rvcuten )
@@ -460,8 +465,8 @@
 !add coupled tendencies due to convection:
  if(convection_scheme .ne. 'off') then
     if(trim(microp_scheme) == 'mp_p3') then
-       !P3 has no bulk qi scalar. The coupling of the convective ice tendency (rqicuten) with the P3
-       !ice categories is not implemented yet, so rqicuten is not applied:
+       !P3 has no bulk qi scalar: the convective ice tendency (rqicuten) is added to the P3 ice scalars
+       !in physics_get_tend (p3cu_add_tend), with the cloud water number tendency:
        do i = 1, nCellsSolve
        do k = 1, nVertLevels
           tend_th(k,i) = tend_th(k,i) + rthcuten(k,i)*mass(k,i)
@@ -483,8 +488,8 @@
     cu_select: select case(trim(convection_scheme))
        case('cu_kain_fritsch')
           if(trim(microp_scheme) == 'mp_p3' .and. index_qs < 1) then
-             !P3 has no qs scalar, so there is no target for the Kain-Fritsch snow tendency (the coupling
-             !of convective ice and snow with the P3 ice categories is not implemented yet):
+             !P3 has no qs scalar: the Kain-Fritsch snow tendency (rqscuten) is added to the P3 ice scalars
+             !in physics_get_tend (p3cu_add_tend):
              do i = 1, nCellsSolve
              do k = 1, nVertLevels
                 tend_scalars(index_qr,k,i) = tend_scalars(index_qr,k,i) + rqrcuten(k,i)*mass(k,i)
