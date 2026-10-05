@@ -8930,7 +8930,8 @@ end function proc_from_LUT_3
 !  - Surface precipitation follows the WRF P3 wrapper: total = prt_liq + prt_sol, solid = prt_sol.
 !==================================================================================================!
  subroutine mp_p3_wrapper_mpas(qv1d, qc1d, qi1d, qr1d, qs1d, qg1d, ni1d, nr1d, nc1d,     &
-                               nwfa1d, nifa1d, thold1d, qvold1d, t1d, p1d, w1d, dzq,    &
+                               nwfa1d, nifa1d, thold1d, qvold1d, t1d, p1d, w1d, sigw1d, &
+                               dzq,                                                     &
                                zdbz1d, effc1d, effiave1d,                               &
                                qit1d, qni1d, qir1d, qib1d, qzi1d, qli1d,                &
                                vmi1d, dmi1d, rhoi1d, dhmax1d,                           &
@@ -8951,6 +8952,7 @@ end function proc_from_LUT_3
   real,    intent(inout), dimension(kts:kte) :: thold1d, qvold1d
   real,    intent(inout), dimension(kts:kte) :: t1d
   real,    intent(in),    dimension(kts:kte) :: p1d, w1d, dzq
+  real,    intent(in),    dimension(kts:kte) :: sigw1d   ! sub-grid w for activation (m/s), layer centres
   real,    intent(inout), dimension(kts:kte) :: zdbz1d, effc1d, effiave1d
   real,    intent(inout), dimension(kts:kte,nCat) :: qit1d, qni1d, qir1d, qib1d, qzi1d, qli1d
   real,    intent(inout), dimension(kts:kte,nCat) :: vmi1d, dmi1d, rhoi1d, dhmax1d
@@ -9011,10 +9013,15 @@ end function proc_from_LUT_3
     if (.not. p3_is_finite(p_local) .or. p_local <= 1.) p_local = p0
     pres(1,k) = p_local
 
-    ! Vertical velocity for droplet activation, floored at 0.1 m/s as in the Stanford version.
-    ! (With p3_aerosols, the ARG activation in p3_main takes sqrt(w); see README open questions.)
+    ! Vertical velocity for droplet activation: resolved w plus sub-grid sigma_w from the PBL
+    ! scheme (WRF/CM1 P3 form, w + sigma_w, then floored at 0.1 m/s). Only used by the ARG
+    ! activation (p3_aerosols); see README open questions.
+    ! NOTE (to do later): w1d is the resolved w on the LOWER FACE of layer k, while sigw1d and the
+    ! cloud/thermodynamic state are at the layer centre; the resolved w should be averaged to the
+    ! layer centre, 0.5*(w(k)+w(k+1)) (needs w at kte+1 from the driver).
     uzpl(1,k) = w1d(k)
     if (.not. p3_is_finite(uzpl(1,k))) uzpl(1,k) = 0.
+    if (p3_is_finite(sigw1d(k))) uzpl(1,k) = uzpl(1,k) + max(0., sigw1d(k))
     uzpl(1,k) = max(0.1, uzpl(1,k))
 
     dzq2(1,k) = dzq(k)

@@ -624,6 +624,16 @@ if (len_trim(p3_lookup_file_dir) == 0) then
  real(kind=RKIND), allocatable :: th1d(:), qv1d(:), qc1d(:), qr1d(:), nr1d(:)
 real(kind=RKIND), allocatable :: qv_in(:), qc_in(:), qr_in(:), qi_in(:), qs_in(:), qg_in(:)
  real(kind=RKIND), allocatable :: p1d(:),  w1d(:),  dz1d(:)
+! --- P3 sub-grid vertical velocity for droplet activation (from the PBL scheme) ---
+ character(len=StrKIND), pointer :: pbl_scheme_mp
+ real(kind=RKIND), dimension(:,:), pointer :: qke_mp, kzh_mp, sigw_p3
+ real(kind=RKIND), dimension(:), pointer :: hpbl_mp
+ real(kind=RKIND), allocatable :: sigw1d(:)
+ real(kind=RKIND), parameter :: sigw_c_ysu    = 0.1_RKIND   ! YSU, inside PBL: l = max(c*hpbl, l_min)
+ real(kind=RKIND), parameter :: sigw_lmin_ysu = 10._RKIND   ! YSU, inside PBL: minimum l (m)
+ real(kind=RKIND), parameter :: sigw_lfree_ysu = 30._RKIND  ! YSU, above PBL: l = rlam (m) of YSU free atmosphere
+ real(kind=RKIND) :: sigw_l, zagl
+ integer :: sigw_opt                                       ! 0: none, 1: MYNN TKE, 2: YSU kzh
  real(kind=RKIND), allocatable :: pi1d(:), t1d(:)
  real(kind=RKIND), allocatable :: qi1d(:), ni1d(:), qs1d(:), qg1d(:)
  real(kind=RKIND), allocatable :: thold1d(:), qvold1d(:)
@@ -852,7 +862,28 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
        allocate(qi1d(kts:kte), ni1d(kts:kte), qs1d(kts:kte), qg1d(kts:kte))
        allocate(thold1d(kts:kte), qvold1d(kts:kte))    ! <<< NEW: "old" state buffers
        allocate(p1d (kts:kte), w1d (kts:kte), dz1d(kts:kte))
+       allocate(sigw1d(kts:kte))
        allocate(nc1d(kts:kte), nwfa1d(kts:kte), nifa1d(kts:kte))
+
+       ! Sub-grid vertical velocity for droplet activation, at layer centres (as in the WRF/CM1 P3
+       ! path, w' = sqrt(2/3 TKE) assuming isotropic turbulence). MYNN: TKE = qke/2 (qke = q^2, layer
+       ! centres; note tke_pbl is not filled by MYNN in MPAS, it stays zero).
+       ! YSU (no TKE): sigma_w = kzh/l; kzh (YSU exch_h) is on the lower face of each layer, so it is
+       ! averaged onto layer centres. Inside the PBL (layer-centre height AGL < hpbl), l = c*hpbl with
+       ! c = 0.1 (floor 10 m): the peak of YSU's K-profile, ~0.08 w* h, then gives ~0.65 w*, the peak
+       ! of the Lenschow et al. (1980) sigma_w profile. Above the PBL, l = 30 m, the mixing length
+       ! (rlam) of YSU's local free-atmosphere closure. Other PBL schemes: no sub-grid term.
+       call mpas_pool_get_config(configs,'config_pbl_scheme',pbl_scheme_mp)
+       call mpas_pool_get_array(diag_physics,'sigw_p3',sigw_p3)
+       sigw_opt = 0
+       if (trim(pbl_scheme_mp) == 'bl_mynn') then
+          call mpas_pool_get_array(diag_physics,'qke',qke_mp)
+          sigw_opt = 1
+       elseif (trim(pbl_scheme_mp) == 'bl_ysu') then
+          call mpas_pool_get_array(diag_physics,'kzh',kzh_mp)
+          call mpas_pool_get_array(diag_physics,'hpbl',hpbl_mp)
+          sigw_opt = 2
+       endif
        allocate(rainprod1d(kts:kte), evapprod1d(kts:kte))
        allocate(zdbz1d(kts:kte), effc1d(kts:kte), effiave1d(kts:kte))
 
@@ -884,6 +915,28 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                 w1d(k)  = w_p(i,k,j)
                 if (.not. ieee_is_finite(w1d(k))) w1d(k) = 0.0_RKIND
                 dz1d(k) = dz_p(i,k,j)
+
+                select case (sigw_opt)
+                case (1)
+                   sigw1d(k) = sqrt(2._RKIND/3._RKIND*max(0._RKIND, 0.5_RKIND*qke_mp(k,i)))
+                case (2)
+                   zagl = z_p(i,k,j) - z_p(i,kts,j) + 0.5_RKIND*dz_p(i,k,j)
+                   if (zagl < hpbl_mp(i)) then
+                      sigw_l = max(sigw_c_ysu*hpbl_mp(i), sigw_lmin_ysu)
+                   else
+                      sigw_l = sigw_lfree_ysu
+                   endif
+                   if (k < kte) then
+                      sigw1d(k) = 0.5_RKIND*(kzh_mp(k,i) + kzh_mp(k+1,i))/sigw_l
+                   else
+                      sigw1d(k) = 0.5_RKIND*kzh_mp(k,i)/sigw_l
+                   endif
+                case default
+                   sigw1d(k) = 0._RKIND
+                end select
+                if (.not. ieee_is_finite(sigw1d(k))) sigw1d(k) = 0.0_RKIND
+                sigw1d(k) = max(0._RKIND, sigw1d(k))
+                sigw_p3(k,i) = sigw1d(k)
 
                 pi1d(k) = pi_p(i,k,j)
                 ! Temperature (K) from theta * Exner
@@ -1082,7 +1135,7 @@ vmi1d(k,c)   = 0.0_RKIND
                      qv1d, qc1d, qi1d, qr1d, qs1d, qg1d, ni1d, nr1d, nc1d, &
                      nwfa1d, nifa1d, &
                      thold1d, qvold1d, &
-                     t1d, p1d, w1d, dz1d, &
+                     t1d, p1d, w1d, sigw1d, dz1d, &
                      zdbz1d, effc1d, effiave1d, &
                      qit1d, qni1d, qir1d, qib1d, qzi1d, qli1d, &
                      vmi1d, dmi1d, rhoi1d, dhmax1d, &
@@ -1325,7 +1378,7 @@ vmi1d(k,c)   = 0.0_RKIND
        deallocate(qv_in, qc_in, qr_in, qi_in, qs_in, qg_in)
        deallocate(pi1d, t1d, qi1d, ni1d, qs1d, qg1d)
        deallocate(thold1d, qvold1d)  ! <<< NEW
-       deallocate(p1d, w1d, dz1d, nc1d, nwfa1d, nifa1d, rainprod1d, evapprod1d, &
+       deallocate(p1d, w1d, sigw1d, dz1d, nc1d, nwfa1d, nifa1d, rainprod1d, evapprod1d, &
                   zdbz1d, effc1d, effiave1d)
        deallocate(qit1d, qni1d, qir1d, qib1d, qzi1d, qli1d, vmi1d, dmi1d, rhoi1d, dhmax1d)
 

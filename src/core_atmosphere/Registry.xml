@@ -2931,6 +2931,10 @@
                      description="gross precipitation evaporation/sublimation mass mixing-ratio rate (scheme-dependent process definition)"
                      packages="mp_thompson_in;mp_thompson_aers_in;mp_p3_in;mp_wsm6_in"/>
 
+                <var name="sigw_p3" type="real" dimensions="nVertLevels nCells Time" units="m s^{-1}"
+                     description="P3: sub-grid vertical velocity added to w for droplet activation, at layer centres (MYNN: sqrt(2/3 TKE), TKE = qke/2; YSU: kzh/l, l = max(0.1 hpbl, 10 m) inside the PBL, 30 m above)"
+                     packages="mp_p3_in"/>
+
                 <var name="re_cloud" type="real" dimensions="nVertLevels nCells Time" units="m"
                      description="effective radius of cloud water droplets"
                      packages="mp_thompson_in;mp_thompson_aers_in;mp_p3_in;mp_wsm6_in"/>
