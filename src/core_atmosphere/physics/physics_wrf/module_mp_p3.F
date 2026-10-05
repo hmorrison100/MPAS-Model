@@ -421,7 +421,7 @@
  epsm   = 0.9     ! mass fraction of soluble material [ ]
  rhoa   = 1777.   ! density of (dry) aerosol [kg/m3]
  map    = 0.132   ! molecular weight of aerosol M_s [kg/mol]
- ma     = 0.0284  ! not used
+ ma     = 0.0284  ! molecular weight of air [kg/mol] (ARG activation)
  rr     = 8.3145  ! ! ideal gas constant [J/mol/K]
  bact   = vi*osm*epsm*mw*rhoa/(map*rhow) ! eq 9a of MG07, assumes beta is 0.5
 ! inv_bact = (map*rhow)/(vi*osm*epsm*mw*rhoa)    *** to replace /bact **
@@ -4348,13 +4348,13 @@ call cpu_time(timer_start(3))
                 duma = es_sat(t(i,k),pres(i,k),0)
                 dumb = uzpl(i,k)
                 alpha = (g*mw*xxlv(i,k))/(cp*rr*t(i,k)*t(i,k))
-                alpha = alpha - (g*map/(rr*t(i,k)))
+                alpha = alpha - (g*ma/(rr*t(i,k)))
                 dum_1 = (rhow*rr*t(i,k)/(duma*dv*mw))
                 dum_2 = (xxlv(i,k)*rhow/(kap*t(i,k)))*( (xxlv(i,k)*mw/(t(i,k)*rr)) -1. )
                 gloc = 1./(dum_1+dum_2)
-                gama = rr*t(i,k)/(duma*mw) + mw*xxlv(i,k)*xxlv(i,k)/(cp*map*t(i,k)*pres(i,k))
+                gama = rr*t(i,k)/(duma*mw) + mw*xxlv(i,k)*xxlv(i,k)/(cp*ma*t(i,k)*pres(i,k))
                 zeta = 2./3.*aact*(alpha*dumb/gloc)**0.5
-                eta = ((alpha*dumb/gloc)**(3./2.))/(na_w(i,k)*gama*rhow*2.*pi)
+                eta = ((alpha*dumb/gloc)**(3./2.))/(na_w(i,k)*rho(i,k)*gama*rhow*2.*pi)
                 tmp1  = 1./bact_arg**0.5
                 sm1   = 2.*tmp1*(aact*thrd*i_rm1_arg)**1.5
                 call maxsat(zeta,eta,f11_arg,f21_arg,sm1,s_max)
