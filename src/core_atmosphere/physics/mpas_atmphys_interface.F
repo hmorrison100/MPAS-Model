@@ -152,6 +152,7 @@
 !local pointers:
  character(len=StrKIND),pointer:: microp_scheme,pbl_scheme
  integer, pointer :: p3_nCat
+ logical, pointer :: p3_aerosols
 
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -196,10 +197,14 @@
 
      case("mp_p3")
         call mpas_pool_get_config(configs,'config_p3_nCat',p3_nCat)
-        ! Ensure aerosol-aware tracers exist (shared with Thompson aerosol-aware design)
+        ! P3 always predicts nc. The aerosol numbers nwfa/nifa (shared with Thompson aerosol-aware design)
+        ! exist only with predicted aerosols (config_p3_aerosols, package mp_p3_aers_in):
+        call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols)
         if(.not.allocated(nc_p))   allocate(nc_p(ims:ime,kms:kme,jms:jme))
-        if(.not.allocated(nifa_p)) allocate(nifa_p(ims:ime,kms:kme,jms:jme))
-        if(.not.allocated(nwfa_p)) allocate(nwfa_p(ims:ime,kms:kme,jms:jme))
+        if(p3_aerosols) then
+           if(.not.allocated(nifa_p)) allocate(nifa_p(ims:ime,kms:kme,jms:jme))
+           if(.not.allocated(nwfa_p)) allocate(nwfa_p(ims:ime,kms:kme,jms:jme))
+        endif
         ! P3 category prognostics live only in state%scalars (MPAS-compatible). No 4-D work arrays.
         ! qzi / qli arrays are always allocated for robustness; populate/ignore based on config flags
 
@@ -442,22 +447,25 @@
  enddo
 
  microp_select: select case(trim(microp_scheme))
-    !mp_p3: nwfa/nifa are also needed by the RRTMG shortwave aerosol optics (gt_aod).
+    !mp_p3: nwfa/nifa are also needed by the RRTMG shortwave aerosol optics (gt_aod). They exist only
+    !with predicted aerosols (config_p3_aerosols; f_nifa and f_nwfa are then true).
     case("mp_thompson_aerosols","mp_p3")
-       nullify(nifa)
-       nullify(nwfa)
-       call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
-       call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
-       nifa => scalars(index_nifa,:,:)
-       nwfa => scalars(index_nwfa,:,:)
-       do j = jts,jte
-          do k = kts,kte
-             do i = its,ite
-                nifa_p(i,k,j) = max(0.,nifa(k,i))
-                nwfa_p(i,k,j) = max(0.,nwfa(k,i))
+       if(f_nifa .and. f_nwfa) then
+          nullify(nifa)
+          nullify(nwfa)
+          call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
+          call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
+          nifa => scalars(index_nifa,:,:)
+          nwfa => scalars(index_nwfa,:,:)
+          do j = jts,jte
+             do k = kts,kte
+                do i = its,ite
+                   nifa_p(i,k,j) = max(0.,nifa(k,i))
+                   nwfa_p(i,k,j) = max(0.,nwfa(k,i))
+                enddo
              enddo
           enddo
-       enddo
+       endif
 
     case default
  end select microp_select
@@ -487,21 +495,30 @@
              enddo
           enddo
        endif
-       !initializes nc_p, nifa_p, and nwfa_p when running the option "mp_thompson_aerosols":
-       if(f_nc .and. f_nifa .and. f_nwfa) then
+       !initializes nc_p, nifa_p, and nwfa_p when running the option "mp_thompson_aerosols". mp_p3 always
+       !has nc, and has nifa and nwfa only with predicted aerosols (config_p3_aerosols):
+       if(f_nc) then
           nullify(nc)
+          call mpas_pool_get_dimension(state,'index_nc',index_nc)
+          nc   => scalars(index_nc,:,:)
+          do j = jts,jte
+             do k = kts,kte
+                do i = its,ite
+                   nc_p(i,k,j)   = max(0.,nc(k,i))
+                enddo
+             enddo
+          enddo
+       endif
+       if(f_nifa .and. f_nwfa) then
           nullify(nifa)
           nullify(nwfa)
-          call mpas_pool_get_dimension(state,'index_nc',index_nc)
           call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
           call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
-          nc   => scalars(index_nc,:,:)
           nifa => scalars(index_nifa,:,:)
           nwfa => scalars(index_nwfa,:,:)
           do j = jts,jte
              do k = kts,kte
                 do i = its,ite
-                   nc_p(i,k,j)   = max(0.,nc(k,i))
                    nifa_p(i,k,j) = max(0.,nifa(k,i))
                    nwfa_p(i,k,j) = max(0.,nwfa(k,i))
                 enddo
@@ -989,16 +1006,20 @@ end do
        if (.not. allocated(nc_p)) then
           stop 'nc_p not allocated in microphysics_from_MPAS'
        end if
-       if (.not. allocated(nifa_p) .or. .not. allocated(nwfa_p)) then
+       ! nwfa/nifa (and nwfa2d/nifa2d) exist only with predicted aerosols (config_p3_aerosols, package
+       ! mp_p3_aers_in); f_nifa and f_nwfa are then true:
+       if (f_nifa .and. f_nwfa .and. (.not. allocated(nifa_p) .or. .not. allocated(nwfa_p))) then
           stop 'P3 aerosol number arrays not allocated in microphysics_from_MPAS'
        end if
 ! Aerosol-aware inputs (reuse MPAS aerosol-aware aerosol-aware tracers/diagnostics)
 call mpas_pool_get_dimension(state,'index_nc'  ,index_nc  )
-call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
-call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
 nc   => scalars(index_nc,:,:)
-nifa => scalars(index_nifa,:,:)
-nwfa => scalars(index_nwfa,:,:)
+if (f_nifa .and. f_nwfa) then
+   call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
+   call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
+   nifa => scalars(index_nifa,:,:)
+   nwfa => scalars(index_nwfa,:,:)
+end if
 
 call mpas_pool_get_array(diag_physics,'nifa2d'  ,nifa2d  )
 call mpas_pool_get_array(diag_physics,'nwfa2d'  ,nwfa2d  )
@@ -1007,31 +1028,41 @@ call mpas_pool_get_array(diag_physics,'evapprod',evapprod)
 call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
 call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
 call mpas_pool_get_array(diag_physics,'re_snow' ,re_snow )
-       if (.not. associated(nifa2d) .or. .not. associated(nwfa2d) .or. .not. associated(rainprod) .or. &
+       if (.not. associated(rainprod) .or. &
            .not. associated(evapprod) .or. .not. associated(re_cloud) .or. .not. associated(re_ice) .or. &
            .not. associated(re_snow)) then
+          stop 'P3: diag_physics aerosol arrays not associated'
+       end if
+       if (f_nifa .and. f_nwfa .and. (.not. associated(nifa2d) .or. .not. associated(nwfa2d))) then
           stop 'P3: diag_physics aerosol arrays not associated'
        end if
        ! P3 aerosol / optics diagnostic work arrays must be allocated during
        ! allocate_microphysics. Do not allocate them here: on restart runs this
        ! routine can be reached immediately after restart-time output, when PIO
        ! and restart buffers are still near the memory high-water mark.
-       if (.not. allocated(nifa2d_p) .or. .not. allocated(nwfa2d_p) .or. .not. allocated(rainprod_p) .or. &
+       if ((f_nifa .and. f_nwfa .and. (.not. allocated(nifa2d_p) .or. .not. allocated(nwfa2d_p))) .or. &
+           .not. allocated(rainprod_p) .or. &
            .not. allocated(evapprod_p) .or. .not. allocated(recloud_p) .or. .not. allocated(reice_p) .or. &
            .not. allocated(resnow_p)) then
           call mpas_log_write('P3_MEMFIX_FATAL: P3 work arrays were not allocated in allocate_microphysics')
           stop 'P3 work arrays must be allocated during allocate_microphysics'
        end if
 do j = jts,jte
-do i = its,ite
-   nifa2d_p(i,j) = nifa2d(i)
-   nwfa2d_p(i,j) = nwfa2d(i)
-enddo
+if (f_nifa .and. f_nwfa) then
+   do i = its,ite
+      nifa2d_p(i,j) = nifa2d(i)
+      nwfa2d_p(i,j) = nwfa2d(i)
+   enddo
+   do k = kts,kte
+   do i = its,ite
+      nifa_p(i,k,j)    = nifa(k,i)
+      nwfa_p(i,k,j)    = nwfa(k,i)
+   enddo
+   enddo
+end if
 do k = kts,kte
 do i = its,ite
    nc_p(i,k,j)      = nc(k,i)
-   nifa_p(i,k,j)    = nifa(k,i)
-   nwfa_p(i,k,j)    = nwfa(k,i)
    ! P3 overwrites these with post-limiter internal process rates in the driver.
    rainprod_p(i,k,j)= 0._RKIND
    evapprod_p(i,k,j)= 0._RKIND
@@ -1137,17 +1168,24 @@ enddo
 
              mp3_tend_select: select case(trim(mp_scheme))
                 case("mp_thompson_aerosols","mp_p3")
+                   !mp_p3: nifa and nwfa exist only with predicted aerosols (config_p3_aerosols):
                    call mpas_pool_get_array(tend_physics,'rncmpten',rncmpten)
-                   call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
-                   call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
 
                    do k = kts,kte
                    do i = its,ite
                       rncmpten(k,i) = nc(k,i)
+                   enddo
+                   enddo
+                   if(f_nifa .and. f_nwfa) then
+                   call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
+                   call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
+                   do k = kts,kte
+                   do i = its,ite
                       rnifampten(k,i) = nifa(k,i)
                       rnwfampten(k,i) = nwfa(k,i)
                    enddo
                    enddo
+                   endif
 
                 case default
              end select mp3_tend_select
@@ -1581,13 +1619,16 @@ end do
 
 
 
-! Aerosol-aware outputs/diagnostics (reuse MPAS aerosol-aware aerosol-aware tracers/diagnostics)
+! Aerosol-aware outputs/diagnostics (reuse MPAS aerosol-aware aerosol-aware tracers/diagnostics).
+! nwfa/nifa (and nwfa2d/nifa2d) exist only with predicted aerosols (f_nifa and f_nwfa true):
 call mpas_pool_get_dimension(state,'index_nc'  ,index_nc  )
-call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
-call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
 nc   => scalars(index_nc,:,:)
-nifa => scalars(index_nifa,:,:)
-nwfa => scalars(index_nwfa,:,:)
+if (f_nifa .and. f_nwfa) then
+   call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
+   call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
+   nifa => scalars(index_nifa,:,:)
+   nwfa => scalars(index_nwfa,:,:)
+end if
 
 call mpas_pool_get_array(diag_physics,'nifa2d'  ,nifa2d  )
 call mpas_pool_get_array(diag_physics,'nwfa2d'  ,nwfa2d  )
@@ -1598,15 +1639,21 @@ call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
 call mpas_pool_get_array(diag_physics,'re_snow' ,re_snow )
 
 do j = jts,jte
-do i = its,ite
-   nifa2d(i) = nifa2d_p(i,j)
-   nwfa2d(i) = nwfa2d_p(i,j)
-enddo
+if (f_nifa .and. f_nwfa) then
+   do i = its,ite
+      nifa2d(i) = nifa2d_p(i,j)
+      nwfa2d(i) = nwfa2d_p(i,j)
+   enddo
+   do k = kts,kte
+   do i = its,ite
+      nifa(k,i)    = nifa_p(i,k,j)
+      nwfa(k,i)    = nwfa_p(i,k,j)
+   enddo
+   enddo
+end if
 do k = kts,kte
 do i = its,ite
    nc(k,i)      = nc_p(i,k,j)
-   nifa(k,i)    = nifa_p(i,k,j)
-   nwfa(k,i)    = nwfa_p(i,k,j)
    rainprod(k,i)= rainprod_p(i,k,j)
    evapprod(k,i)= evapprod_p(i,k,j)
 
@@ -1740,17 +1787,24 @@ enddo
 
              mp3_tend_select: select case(trim(mp_scheme))
                 case("mp_thompson_aerosols","mp_p3")
+                   !mp_p3: nifa and nwfa exist only with predicted aerosols (config_p3_aerosols):
                    call mpas_pool_get_array(tend_physics,'rncmpten',rncmpten)
-                   call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
-                   call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
 
                    do k = kts,kte
                    do i = its,ite
                       rncmpten(k,i)   = (nc(k,i)-rncmpten(k,i))/dt_dyn
+                   enddo
+                   enddo
+                   if(f_nifa .and. f_nwfa) then
+                   call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
+                   call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
+                   do k = kts,kte
+                   do i = its,ite
                       rnifampten(k,i) = (nifa(k,i)-rnifampten(k,i))/dt_dyn
                       rnwfampten(k,i) = (nwfa(k,i)-rnwfampten(k,i))/dt_dyn
                    enddo
                    enddo
+                   endif
 
                 case default
              end select mp3_tend_select

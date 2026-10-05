@@ -470,7 +470,8 @@
                 <package name="mp_thompson_in" description="parameterization of Thompson cloud microphysics."/>
                 <package name="mp_thompson_aers_in" description="parameterization of aerosol-aware Thompson cloud microphysics."/>
                 
-                <package name="mp_p3_in" description="parameterization of aerosol-aware P3 cloud microphysics."/>
+                <package name="mp_p3_in" description="parameterization of P3 cloud microphysics."/>
+                <package name="mp_p3_aers_in" description="P3 with predicted aerosols (config_p3_aerosols): nwfa, nifa and the aerosol surface source and optical depth active."/>
                 <package name="mp_p3_cat2_in" description="P3 category-2 prognostic scalars active."/>
                 <package name="mp_p3_cat3_in" description="P3 category-3 prognostic scalars active."/>
                 <package name="mp_p3_3mom_in" description="P3 triple-moment ice (config_p3_trplMomI): category-1 p3_qzi active."/>
@@ -1762,11 +1763,11 @@
 
                         <var name="nifa" array_group="number" units="nb kg^{-1}"
                              description="Ice-friendly aerosol number concentration"
-                             packages="mp_thompson_aers_in;mp_p3_in"/>
+                             packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                         <var name="nwfa" array_group="number" units="nb kg^{-1}"
                              description="Water-friendly aerosol number concentration"
-                             packages="mp_thompson_aers_in;mp_p3_in"/>
+                             packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
 
                         <!-- ===================== P3 multi-category prognostic state (max 3 categories) ===================== -->
@@ -2196,11 +2197,11 @@
 
                         <var name="tend_nifa" name_in_code="nifa" array_group="number" units="nb m^{-3} s^{-1}"
                              description="Tendency of ice-friendly aerosol number concentration multiplied by dry air density divided by d(zeta)/dz"
-                             packages="mp_thompson_aers_in;mp_p3_in"/>
+                             packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                         <var name="tend_nwfa" name_in_code="nwfa" array_group="number" units="nb m^{-3} s^{-1}"
                              description="Tendency of water-friendly aerosol number concentration multiplied by dry air density divided by d(zeta)/dz"
-                             packages="mp_thompson_aers_in;mp_p3_in"/>
+                             packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                         <!-- P3 multi-category prognostic tendencies; ordering must match the state scalars array exactly. -->
                         <var name="tend_p3_qni"  name_in_code="p3_qni"  array_group="number" units="nb m^{-3} s^{-1}"
@@ -2339,11 +2340,11 @@
                              units="m^{-3} s^{-1}"
                              description="Lateral boundary tendency of cloud water number concentration"/>
 
-                        <var name="lbc_nifa" name_in_code="nifa" array_group="number" packages="mp_thompson_aers_in;mp_p3_in"
+                        <var name="lbc_nifa" name_in_code="nifa" array_group="number" packages="mp_thompson_aers_in;mp_p3_aers_in"
                              units="m^{-3} s^{-1}"
                              description="Lateral boundary tendency of ice-friendly aerosol number concentration"/>
 
-                        <var name="lbc_nwfa" name_in_code="nwfa" array_group="number" packages="mp_thompson_aers_in;mp_p3_in"
+                        <var name="lbc_nwfa" name_in_code="nwfa" array_group="number" packages="mp_thompson_aers_in;mp_p3_aers_in"
                              units="m^{-3} s^{-1}"
                              description="Lateral boundary tendency of water-friendly aerosol number concentration"/>
                         <var name="lbc_p3_qni" name_in_code="p3_qni" array_group="number" packages="mp_p3_in"
@@ -2593,7 +2594,7 @@
 
                 <nml_option name="config_p3_aerosols" type="logical" default_value="true" in_defaults="false"
                      units="-"
-                     description="Enable aerosol-aware P3 coupling (NWFA/NIFA)"/>
+                     description="Enable aerosol-aware P3 (predicted aerosols): the water- and ice-friendly aerosol numbers nwfa and nifa are allocated, advected and used by P3 (and by the RRTMG shortwave aerosol optics) only if true"/>
 
                 <nml_option name="config_p3_abort_on_err" type="logical" default_value="true" in_defaults="false"
                      units="-"
@@ -2952,11 +2953,11 @@
 
                 <var name="nwfa2d" type="real" dimensions="nCells Time" units="nb kg^{-1} s^{-1}"
                      description="surface emission of water-friendly aerosols"
-                     packages="mp_thompson_aers_in;mp_p3_in"/>
+                     packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                 <var name="nifa2d" type="real" dimensions="nCells Time" units="nb kg^{-1} s^{-1}"
                      description="surface emission of ice-friendly aerosols"
-                     packages="mp_thompson_aers_in;mp_p3_in"/>
+                     packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                 <var name="sr" type="real" dimensions="nCells Time" units="unitless"
                      description="time-step ratio of frozen versus total grid-scale precipitation"/>
@@ -3698,11 +3699,11 @@
 
                 <var name="taod5502d" type="real" dimensions="nCells Time" units="unitless"
                      description="total aerosol optical depth at 550 nm from the Thompson cloud microphysics"
-                     packages="mp_thompson_aers_in;mp_p3_in"/>
+                     packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                 <var name="taod5503d" type="real" dimensions="nVertLevels nCells Time" units="unitless"
                      description="aerosol optical depth at 550 nm from the Thompson cloud microphysics"
-                     packages="mp_thompson_aers_in;mp_p3_in"/>
+                     packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
 
                 <!-- ================================================================================================== -->
@@ -3888,11 +3889,11 @@
 
                 <var name="rnifampten" type="real" dimensions="nVertLevels nCells Time" units="nb kg^{-1} s^{-1}"
                      description="tendency of ice-friendly aerosol number concentration due to microphysics"
-                     packages="mp_thompson_aers_in;mp_p3_in"/>
+                     packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                 <var name="rnwfampten" type="real" dimensions="nVertLevels nCells Time" units="nb kg^{-1} s^{-1}"
                      description="tendency of water-friendly aerosol number concentration due to microphysics"
-                     packages="mp_thompson_aers_in;mp_p3_in"/>
+                     packages="mp_thompson_aers_in;mp_p3_aers_in"/>
 
                 <!-- ================================================================================================== -->
                 <!-- TENDENCIES FROM PARAMETERIZATION OF CONVECTION:                                                    -->

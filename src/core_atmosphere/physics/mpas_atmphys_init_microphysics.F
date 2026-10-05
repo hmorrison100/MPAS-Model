@@ -23,6 +23,7 @@
  private
  public:: init_thompson_clouddroplets_forMPAS, &
           init_thompson_aerosols_forMPAS, &
+          init_p3_forMPAS, &
           init_p3_aerosols_forMPAS
 
 !MPAS main initialization of the Thompson parameterization of cloud microphysics with nucleation of cloud
@@ -255,89 +256,40 @@
  end subroutine init_thompson_aerosols_forMPAS
 
 !=================================================================================================================
-subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_physics)
+subroutine init_p3_forMPAS(do_restart,dminfo,state,time_lev)
 !=================================================================================================================
 !
-! Initialize aerosol fields for P3 microphysics (mp_p3).
-! This routine reuses the Thompson aerosol tracer definitions (nwfa/nifa) and associated 2D diagnostics.
-! It intentionally does NOT read the Thompson CCN activation lookup table (CCN_ACTIVATE_DATA).
+! Cold-start initialization of the P3 prognostic scalars (mp_p3): replaces missing (NaN/Inf) or negative values
+! of the bulk scalars and of the P3 ice-category scalars by zero. The aerosols (nwfa, nifa) are initialized
+! separately in init_p3_aerosols_forMPAS, only if config_p3_aerosols is true.
 !
 !input variables:
  type(dm_info),intent(in):: dminfo
- type(mpas_pool_type),intent(in):: mesh
  logical,intent(in):: do_restart
  integer,intent(in):: time_lev
 
 !inout variables:
- type(mpas_pool_type),intent(inout):: diag_physics
  type(mpas_pool_type),intent(inout):: state
 
 !local variables and pointers:
- integer,pointer:: nCellsSolve,nVertLevels
- integer,pointer:: index_nifa,index_nwfa
-
  integer,pointer:: index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi,index_p3_qli
  integer,pointer                     :: index_qv, index_qc, index_qr, index_qi, index_qs, index_qg
  integer,pointer                     :: index_nc, index_nr, index_ni
  integer :: c, nCat_reg
  logical :: p3_present
 
-
- real(kind=RKIND),dimension(:),pointer    :: areaCell
- real(kind=RKIND),dimension(:),pointer    :: nifa2d,nwfa2d
- real(kind=RKIND),dimension(:,:),pointer  :: zgrid,zz
- real(kind=RKIND),dimension(:,:),pointer  :: rho_zz,nifa,nwfa
  real(kind=RKIND),dimension(:,:,:),pointer:: scalars
  real(kind=RKIND),dimension(:,:),pointer  :: qv,qc,qr,qi,qs,qg,nc,nr,ni
 
- character(len=StrKIND):: mess
-
- integer:: iCell, k
-
- real(kind=RKIND):: max_test
- real(kind=RKIND):: airmass
- real(kind=RKIND):: h_01
- real(kind=RKIND):: niIN3,niCCN3
- real(kind=RKIND):: nifa_max,nifa_min,global_nifa_max,global_nifa_min
- real(kind=RKIND):: nwfa_max,nwfa_min,global_nwfa_max,global_nwfa_min
- real(kind=RKIND),dimension(:,:),allocatable:: hgt
-
 !-----------------------------------------------------------------------------------------------------------------
- call mpas_log_write('--- init_p3_aerosols_forMPAS: begin', masterOnly=.true.)
-!... read a static file containing CCN activation of aerosols. The data were created from a parcel model by
-!... Feingold & Heymsfield with further changes by Eidhammer and Kriedenweis.
-!... if do_restart is true, then we do not need to check the initialization of nwfa, nifa, and nwfa2d. If false,
-!    then, we proceed with the initialization:
+ call mpas_log_write('--- init_p3_forMPAS: begin', masterOnly=.true.)
+!... if do_restart is true, the P3 scalars are read from the restart file and are not modified:
  if(do_restart) return
 
- call mpas_pool_get_dimension(mesh,'nCellsSolve',nCellsSolve)
- call mpas_pool_get_dimension(mesh,'nVertLevels',nVertLevels)
- if (.not. associated(nCellsSolve) .or. .not. associated(nVertLevels)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: missing nCellsSolve/nVertLevels mesh dimensions')
- endif
-
- call mpas_pool_get_array(mesh,'areaCell',areaCell)
- call mpas_pool_get_array(mesh,'zgrid'   ,zgrid   )
- call mpas_pool_get_array(mesh,'zz'      ,zz      )
- if (.not. associated(areaCell) .or. .not. associated(zgrid) .or. .not. associated(zz)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: missing areaCell/zgrid/zz mesh arrays')
- endif
-
- call mpas_pool_get_array(diag_physics,'nifa2d',nifa2d)
- call mpas_pool_get_array(diag_physics,'nwfa2d',nwfa2d)
- if (.not. associated(nifa2d) .or. .not. associated(nwfa2d)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: nifa2d/nwfa2d are not active in diag_physics; check Registry packages for mp_p3_in')
- endif
-
- call mpas_pool_get_dimension(state,'index_nifa'  ,index_nifa  )
- call mpas_pool_get_dimension(state,'index_nwfa'  ,index_nwfa  )
-
  call mpas_pool_get_array(state,'scalars',scalars,time_lev)
- if (.not. associated(index_nifa) .or. .not. associated(index_nwfa) .or. .not. associated(scalars)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: missing nifa/nwfa scalar indices or state%scalars')
+ if (.not. associated(scalars)) then
+    call physics_error_fatal('init_p3_forMPAS: state%scalars is not associated')
  endif
- nifa   => scalars(index_nifa,:,:)
- nwfa   => scalars(index_nwfa,:,:)
 
  !
  ! MPAS bulk-compatible bulk microphysics tracers (used for cold-start sanitization and optional P3 seeding)
@@ -353,7 +305,7 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
  if (.not. associated(index_qv) .or. .not. associated(index_qc) .or. .not. associated(index_qr) .or. &
      .not. associated(index_qi) .or. .not. associated(index_qs) .or. .not. associated(index_qg) .or. &
      .not. associated(index_nc) .or. .not. associated(index_nr) .or. .not. associated(index_ni)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: missing one or more bulk scalar indices required by P3')
+    call physics_error_fatal('init_p3_forMPAS: missing one or more bulk scalar indices required by P3')
  endif
 
  qv => scalars(index_qv,:,:)
@@ -386,8 +338,6 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
  if (associated(ni)) then
     where (.not. ieee_is_finite(ni) .or. ni < 0._RKIND .or. ni > 1.0e12_RKIND) ni = 0._RKIND
  end if
- where (.not. ieee_is_finite(nwfa) .or. nwfa < 0._RKIND .or. nwfa > 1.0e12_RKIND) nwfa = 0._RKIND
- where (.not. ieee_is_finite(nifa) .or. nifa < 0._RKIND .or. nifa > 1.0e12_RKIND) nifa = 0._RKIND
 
  
  !-----------------------------------------------------------------------------------------------
@@ -404,13 +354,13 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
   if (.not.associated(index_p3_qit) .or. .not.associated(index_p3_qni) .or. &
       .not.associated(index_p3_qir) .or. .not.associated(index_p3_qib) .or. &
       .not.associated(index_p3_qzi) .or. .not.associated(index_p3_qli)) then
-     call physics_error_fatal('mpas_atmphys_init_microphysics init_p3_aerosols_forMPAS: missing P3 scalar indices in state pool')
+     call physics_error_fatal('mpas_atmphys_init_microphysics init_p3_forMPAS: missing P3 scalar indices in state pool')
   endif
   nCat_reg = max(1, index_p3_qir - index_p3_qni)   ! p3_qit* are in the moist group, apart from qni/qir/qib
   if (index_p3_qit + nCat_reg - 1 > size(scalars,1)) nCat_reg = 1
   if(dminfo % my_proc_id == IO_NODE) then
-     call mpas_log_write('--- init_p3_aerosols_forMPAS: P3 nCat_layout = $i', intArgs=(/nCat_reg/))
-     call mpas_log_write('--- init_p3_aerosols_forMPAS: P3 scalar indices (qit,qni,qir,qib,qzi,qli) = $i $i $i $i $i $i', &
+     call mpas_log_write('--- init_p3_forMPAS: P3 nCat_layout = $i', intArgs=(/nCat_reg/))
+     call mpas_log_write('--- init_p3_forMPAS: P3 scalar indices (qit,qni,qir,qib,qzi,qli) = $i $i $i $i $i $i', &
                          intArgs=(/index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi,index_p3_qli/))
   endif
  
@@ -458,6 +408,93 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
  end if
 
  !-----------------------------------------------------------------------------------------------
+
+ call mpas_log_write('--- init_p3_forMPAS: end', masterOnly=.true.)
+end subroutine init_p3_forMPAS
+
+
+!=================================================================================================================
+subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_physics)
+!=================================================================================================================
+!
+! Initialize the aerosol fields for P3 microphysics with predicted aerosols (mp_p3 with config_p3_aerosols; package
+! mp_p3_aers_in). This routine reuses the Thompson aerosol tracer definitions (nwfa/nifa) and associated 2D diagnostics.
+! It intentionally does NOT read the Thompson CCN activation lookup table (CCN_ACTIVATE_DATA).
+!
+!input variables:
+ type(dm_info),intent(in):: dminfo
+ type(mpas_pool_type),intent(in):: mesh
+ logical,intent(in):: do_restart
+ integer,intent(in):: time_lev
+
+!inout variables:
+ type(mpas_pool_type),intent(inout):: diag_physics
+ type(mpas_pool_type),intent(inout):: state
+
+!local variables and pointers:
+ integer,pointer:: nCellsSolve,nVertLevels
+ integer,pointer:: index_nifa,index_nwfa
+
+
+
+ real(kind=RKIND),dimension(:),pointer    :: areaCell
+ real(kind=RKIND),dimension(:),pointer    :: nifa2d,nwfa2d
+ real(kind=RKIND),dimension(:,:),pointer  :: zgrid,zz
+ real(kind=RKIND),dimension(:,:),pointer  :: rho_zz,nifa,nwfa
+ real(kind=RKIND),dimension(:,:,:),pointer:: scalars
+
+ character(len=StrKIND):: mess
+
+ integer:: iCell, k
+
+ real(kind=RKIND):: max_test
+ real(kind=RKIND):: airmass
+ real(kind=RKIND):: h_01
+ real(kind=RKIND):: niIN3,niCCN3
+ real(kind=RKIND):: nifa_max,nifa_min,global_nifa_max,global_nifa_min
+ real(kind=RKIND):: nwfa_max,nwfa_min,global_nwfa_max,global_nwfa_min
+ real(kind=RKIND),dimension(:,:),allocatable:: hgt
+
+!-----------------------------------------------------------------------------------------------------------------
+ call mpas_log_write('--- init_p3_aerosols_forMPAS: begin', masterOnly=.true.)
+!... read a static file containing CCN activation of aerosols. The data were created from a parcel model by
+!... Feingold & Heymsfield with further changes by Eidhammer and Kriedenweis.
+!... if do_restart is true, then we do not need to check the initialization of nwfa, nifa, and nwfa2d. If false,
+!    then, we proceed with the initialization:
+ if(do_restart) return
+
+ call mpas_pool_get_dimension(mesh,'nCellsSolve',nCellsSolve)
+ call mpas_pool_get_dimension(mesh,'nVertLevels',nVertLevels)
+ if (.not. associated(nCellsSolve) .or. .not. associated(nVertLevels)) then
+    call physics_error_fatal('init_p3_aerosols_forMPAS: missing nCellsSolve/nVertLevels mesh dimensions')
+ endif
+
+ call mpas_pool_get_array(mesh,'areaCell',areaCell)
+ call mpas_pool_get_array(mesh,'zgrid'   ,zgrid   )
+ call mpas_pool_get_array(mesh,'zz'      ,zz      )
+ if (.not. associated(areaCell) .or. .not. associated(zgrid) .or. .not. associated(zz)) then
+    call physics_error_fatal('init_p3_aerosols_forMPAS: missing areaCell/zgrid/zz mesh arrays')
+ endif
+
+ call mpas_pool_get_array(diag_physics,'nifa2d',nifa2d)
+ call mpas_pool_get_array(diag_physics,'nwfa2d',nwfa2d)
+ if (.not. associated(nifa2d) .or. .not. associated(nwfa2d)) then
+    call physics_error_fatal('init_p3_aerosols_forMPAS: nifa2d/nwfa2d are not active in diag_physics; check Registry packages for mp_p3_aers_in')
+ endif
+
+ call mpas_pool_get_dimension(state,'index_nifa'  ,index_nifa  )
+ call mpas_pool_get_dimension(state,'index_nwfa'  ,index_nwfa  )
+
+ call mpas_pool_get_array(state,'scalars',scalars,time_lev)
+ if (.not. associated(index_nifa) .or. .not. associated(index_nwfa) .or. .not. associated(scalars)) then
+    call physics_error_fatal('init_p3_aerosols_forMPAS: missing nifa/nwfa scalar indices or state%scalars')
+ endif
+ nifa   => scalars(index_nifa,:,:)
+ nwfa   => scalars(index_nwfa,:,:)
+
+ where (.not. ieee_is_finite(nwfa) .or. nwfa < 0._RKIND .or. nwfa > 1.0e12_RKIND) nwfa = 0._RKIND
+ where (.not. ieee_is_finite(nifa) .or. nifa < 0._RKIND .or. nifa > 1.0e12_RKIND) nifa = 0._RKIND
+
  
 
  call mpas_pool_get_array(state,'rho_zz',rho_zz,time_lev)

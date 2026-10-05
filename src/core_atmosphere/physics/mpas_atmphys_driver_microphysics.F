@@ -114,6 +114,7 @@
  integer, pointer :: p3_nCat
  logical, pointer :: p3_trplMomI
  logical, pointer :: p3_liqfrac
+ logical, pointer :: p3_aerosols
 
   logical, pointer :: p3_debug_on_ptr
   logical, save :: p3dbg_alloc_banner_done = .false.
@@ -236,10 +237,14 @@ if (allocated(evapprod_p)) evapprod_p = 0._RKIND
     
        !--- aerosol-aware: prognostic droplet number + aerosol number mixing ratios
        if(.not.allocated(nc_p)    ) allocate(nc_p(ims:ime,kms:kme,jms:jme))
-       if(.not.allocated(nwfa_p)  ) allocate(nwfa_p(ims:ime,kms:kme,jms:jme))
-       if(.not.allocated(nifa_p)  ) allocate(nifa_p(ims:ime,kms:kme,jms:jme))
-       if(.not.allocated(nwfa2d_p)) allocate(nwfa2d_p(ims:ime,jms:jme))
-       if(.not.allocated(nifa2d_p)) allocate(nifa2d_p(ims:ime,jms:jme))
+       !--- aerosol numbers and their surface source only with predicted aerosols (package mp_p3_aers_in):
+       call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols)
+       if(p3_aerosols) then
+          if(.not.allocated(nwfa_p)  ) allocate(nwfa_p(ims:ime,kms:kme,jms:jme))
+          if(.not.allocated(nifa_p)  ) allocate(nifa_p(ims:ime,kms:kme,jms:jme))
+          if(.not.allocated(nwfa2d_p)) allocate(nwfa2d_p(ims:ime,jms:jme))
+          if(.not.allocated(nifa2d_p)) allocate(nifa2d_p(ims:ime,jms:jme))
+       endif
     
        !--- surface precipitation bookkeeping (MPAS expects these arrays to exist for "snow"/"sr")
        if(.not.allocated(sr_p)        ) allocate(sr_p(ims:ime,jms:jme)        )
@@ -460,8 +465,11 @@ end subroutine deallocate_microphysics
 
     case("mp_p3")
 
-       ! Initialize aerosol tracer profiles (nwfa/nifa/nc) for P3 when not restarting
-       call init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_physics)
+       ! Cold-start initialization of the P3 scalars and, with predicted aerosols (config_p3_aerosols),
+       ! of the aerosol numbers nwfa/nifa and their surface source nwfa2d/nifa2d:
+       call init_p3_forMPAS(do_restart,dminfo,state,time_lev)
+       call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols)
+       if(p3_aerosols) call init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_physics)
        ! P3 lookup tables + parameter initialization (must run before first p3_main call)
        call mpas_pool_get_config(configs,'config_p3_lookup_file_dir',p3_lookup_file_dir)
        call mpas_pool_get_config(configs,'config_p3_nCat'           ,p3_nCat           )
@@ -608,6 +616,7 @@ if (len_trim(p3_lookup_file_dir) == 0) then
 ! --- P3 config ---
  integer, pointer :: p3_nCat_ptr
  logical, pointer :: p3_trplMomI_ptr, p3_liqfrac_ptr
+ logical, pointer :: p3_aerosols_ptr
  integer :: p3_nCat
  logical :: p3_trplMomI, p3_liqfrac
   logical :: rolling_old
@@ -771,6 +780,8 @@ real(kind=RKIND) :: aerosol_source_w, aerosol_source_i
 
        call mpas_pool_get_config(configs,'config_p3_nCat',p3_nCat_ptr)
         p3_nCat = p3_nCat_ptr
+       ! nwfa/nifa and nwfa2d/nifa2d exist only with predicted aerosols (package mp_p3_aers_in):
+       call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols_ptr)
 call mpas_pool_get_dimension(state,'index_p3_qit', idx_qit)
 call mpas_pool_get_dimension(state,'index_p3_qni', idx_qni)
 call mpas_pool_get_dimension(state,'index_p3_qir', idx_qir)
@@ -831,7 +842,7 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                 if (.not. allocated(nc_p)) then
            stop 'nc_p not allocated in driver_microphysics'
         end if
-        if (.not. allocated(nifa_p) .or. .not. allocated(nwfa_p)) then
+        if (p3_aerosols_ptr .and. (.not. allocated(nifa_p) .or. .not. allocated(nwfa_p))) then
            stop 'P3 aerosol number arrays not allocated in driver_microphysics'
         end if
        ! Column buffers
@@ -928,8 +939,13 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                 qs1d(k) = 0.0_RKIND
                 qg1d(k) = 0.0_RKIND
                 nc1d(k)   = nc_p(i,k,j)
-                nwfa1d(k) = nwfa_p(i,k,j)
-                nifa1d(k) = nifa_p(i,k,j)
+                if (p3_aerosols_ptr) then
+                   nwfa1d(k) = nwfa_p(i,k,j)
+                   nifa1d(k) = nifa_p(i,k,j)
+                else
+                   nwfa1d(k) = 0._RKIND   ! not used by P3 without predicted aerosols
+                   nifa1d(k) = 0._RKIND
+                end if
 
              end do
 
@@ -1157,7 +1173,7 @@ vmi1d(k,c)   = 0.0_RKIND
                 if (allocated(nifa2d_p)) aerosol_source_i = nifa2d_p(i,j)
                 if (.not. ieee_is_finite(aerosol_source_w)) aerosol_source_w = 0._RKIND
                 if (.not. ieee_is_finite(aerosol_source_i)) aerosol_source_i = 0._RKIND
-                if (kts <= kte) then
+                if (p3_aerosols_ptr .and. kts <= kte) then
                    nwfa1d(kts) = max(0._RKIND, nwfa1d(kts) + aerosol_source_w * dt_microp)
                    nifa1d(kts) = max(0._RKIND, nifa1d(kts) + aerosol_source_i * dt_microp)
                    if (i == its .and. j == jts .and. associated(p3_debug_on_ptr) .and. p3_debug_on_ptr) then
@@ -1274,8 +1290,10 @@ vmi1d(k,c)   = 0.0_RKIND
                 nr_p(i,k,j) = nr1d(k)
 
                 nc_p(i,k,j)   = nc1d(k)
-                nwfa_p(i,k,j) = nwfa1d(k)
-                nifa_p(i,k,j) = nifa1d(k)
+                if (p3_aerosols_ptr) then
+                   nwfa_p(i,k,j) = nwfa1d(k)
+                   nifa_p(i,k,j) = nifa1d(k)
+                end if
 
                 ! P3 equivalent reflectivity (diag_ze, dBZ) from the last substep
                 refl_p3_p(i,k,j) = zdbz1d(k)
