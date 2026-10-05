@@ -581,7 +581,7 @@ subroutine init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_p
  k = 1
  do iCell = 1, nCellsSolve
     airmass = rho_zz(k,iCell)*zz(k,iCell)
-    airmass = airmass*(zgrid(k+1,iCell)-zgrid(k,iCell))*400000000.0 ! (in kg)
+    airmass = airmass*(zgrid(k+1,iCell)-zgrid(k,iCell))*areaCell(iCell) ! (in kg; as in init_thompson_aerosols_forMPAS)
     nwfa2d(iCell) = nwfa(k,iCell)*0.000196*airmass*0.5e-10
     nifa2d(iCell) = 0._RKIND
 !   call mpas_log_write('$i $r $r $r',intArgs=(/iCell/),realArgs=(/airmass,nwfa2d(iCell),nifa2d(iCell)/))
