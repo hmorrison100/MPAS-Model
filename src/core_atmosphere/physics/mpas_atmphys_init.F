@@ -259,10 +259,13 @@ use mpas_stream_manager
 
 !mp_p3: there is no bulk qi scalar, but qi_p (the sum over the P3 ice categories) is passed to the PBL,
 !convection, cloud fraction and radiation schemes, so f_qi is set to true. f_ni stays false: the PBL
-!schemes mix the P3 scalars directly (mpas_atmphys_p3_pblmix). The P3 work fields are allocated here,
-!outside OpenMP regions:
+!schemes mix the P3 scalars directly (mpas_atmphys_p3_pblmix). f_qs and f_qg stay false, also when the
+!bulk qs and qg scalars are allocated (zero) with config_p3_ic_bulk_ice. The P3 work fields are allocated
+!here, outside OpenMP regions:
  if(trim(config_microp_scheme) == 'mp_p3') then
     f_qi = .true.
+    f_qs = .false.
+    f_qg = .false.
     call p3_allocate_work(state)
  endif
 

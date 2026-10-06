@@ -506,7 +506,7 @@
 
     cu_select: select case(trim(convection_scheme))
        case('cu_kain_fritsch')
-          if(trim(microp_scheme) == 'mp_p3' .and. index_qs < 1) then
+          if(trim(microp_scheme) == 'mp_p3') then
              !P3 has no qs scalar: the Kain-Fritsch snow tendency (rqscuten) is added to the P3 ice scalars
              !in physics_get_tend (p3cu_add_tend):
              do i = 1, nCellsSolve

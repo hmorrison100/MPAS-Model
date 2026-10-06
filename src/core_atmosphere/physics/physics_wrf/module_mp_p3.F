@@ -28,8 +28,8 @@
 !    https://github.com/P3-microphysics/P3-microphysics                                    !
 !__________________________________________________________________________________________!
 !                                                                                          !
-! Version:       6.0.0-rc1+mpas                                                            !
-! Last updated:  2026 Sep                                                                  !
+! Version:       6.0.0-rc3+mpas                                                            !
+! Last updated:  2026 Oct                                                                  !
 !__________________________________________________________________________________________!
 
  MODULE microphy_p3
@@ -256,7 +256,7 @@
 
 ! Local variables and parameters:
  logical, save                  :: is_init = .false.
- character(len=1024), parameter :: version_p3                    = '6.0.0-rc1+mpas'
+ character(len=1024), parameter :: version_p3                    = '6.0.0-rc3+mpas'
  character(len=1024), parameter :: version_intended_table_1_2mom = '6.9-2momI'
  character(len=1024), parameter :: version_intended_table_1_3mom = '6.9-3momI'
  character(len=1024), parameter :: version_intended_table_2      = '6.2'
@@ -1028,7 +1028,7 @@ END subroutine p3_init
                 qit_3, qni_3, qir_3, qib_3, diag_vmi_3, diag_dmi_3, diag_rhoi_3, qzi_3, qli_3,  &
                 qit_4, qni_4, qir_4, qib_4, diag_vmi_4, diag_dmi_4, diag_rhoi_4, qzi_4, qli_4,  &
                 nc, diag2d_01, diag2d_02, diag3d_01, diag3d_02, diag3d_03,                      &
-                diag_dhmax_1, diag_dhmax_2, diag_dhmax_3, diag_dhmax_4 )
+                diag_dhmax_1, diag_dhmax_2, diag_dhmax_3, diag_dhmax_4, naw, nai )
 
   !------------------------------------------------------------------------------------------!
   ! This is the main interface for P3 microphysics scheme with the WRF and CM1 models.       !
@@ -1062,6 +1062,9 @@ END subroutine p3_init
   ! qni_(x)   --   number mixing ratio, category x (#/kg)
   ! qir_(x)   --   rime ice mass mixing ratio category 1 (kg/kg)
   ! qib_(x)   --   ice rime volume mixing ratio category 1 (m^-3 kg^-1)
+  ! naw       --   water-friendly aerosol number mixing ratio (#/kg)  [optional; prognostic aerosols]
+  ! nai       --   ice-friendly aerosol number mixing ratio   (#/kg)  [optional; prognostic aerosols]
+  !              (prognostic aerosols are active if and only if both naw and nai are present)
 
   !--- output:
 
@@ -1094,6 +1097,7 @@ END subroutine p3_init
    real, dimension(ims:ime, kms:kme, jms:jme), intent(inout), optional :: nc
    real, dimension(ims:ime, kms:kme, jms:jme), intent(inout), optional :: qzi_1
    real, dimension(ims:ime, kms:kme, jms:jme), intent(inout), optional :: qli_1
+   real, dimension(ims:ime, kms:kme, jms:jme), intent(inout), optional :: naw, nai
 
    real, dimension(ims:ime, kms:kme, jms:jme), intent(inout), optional :: qit_2
    real, dimension(ims:ime, kms:kme, jms:jme), intent(inout), optional :: qni_2
@@ -1136,7 +1140,7 @@ END subroutine p3_init
    integer, intent(in) :: n_iceCat
 
    !--- local variables/parameters:
-   real, dimension(ims:ime, kms:kme) :: nc_loc,ssat,dum_naw,dum_nai
+   real, dimension(ims:ime, kms:kme) :: nc_loc,ssat,naw_loc,nai_loc,w_loc
    real, dimension(ims:ime, kms:kme, n_iceCat) :: qitot,qirim,nitot,birim,diag_dmi,diag_vmi,       &
                                                   diag_rhoi,diag_effi
    real, dimension(its:ite, kts:kte, n_iceCat) :: diag_dhmax
@@ -1159,7 +1163,9 @@ END subroutine p3_init
    logical                           :: log_liqFrac
    logical, parameter                :: log_scpf      = .false.  ! switch for activation of SCPF scheme
    logical, parameter                :: log_debug     = .false.  ! switch for internal real-time debug checking
-   logical, parameter                :: log_aerosols  = .false.  ! switch for prognostic aerosols
+   logical                           :: log_aerosols             ! switch for prognostic aerosols
+   real, parameter                   :: w_min_act = 0.1          ! minimum w (m/s) passed to p3_main with prognostic aerosols
+                                                                 ! (ARG activation needs w > 0; same floor as the GEM wrapper)
 
    real, dimension(its:ite, kts:kte) :: cldfrac                  ! cloud fraction computed by SCPF
    real                              :: scpf_pfrac               ! precipitation fraction factor (SCPF)
@@ -1174,6 +1180,12 @@ END subroutine p3_init
    log_predictNc = present(nc)
    log_3momIce   = present(qzi_1)
    log_liqFrac   = present(qli_1)
+   log_aerosols  = present(naw) .and. present(nai)
+
+   if (present(naw) .neqv. present(nai)) then
+      print*,'*** ERROR in mp_p3_wrapper_wrfcm1: naw and nai must be passed together (prognostic aerosols)'
+      stop
+   endif
 
    if (trim(model)=='WRF') then
       freq3Ddiag = freq3Ddiag_wrf
@@ -1186,9 +1198,6 @@ END subroutine p3_init
    scpf_pfrac   = 0.  ! SCPF currently not used in WRF/CM1
    scpf_resfact = 0.  ! SCPF currently not used in WRF/CM1
 
-   dum_naw = 300.e+6 !temporary
-   dum_nai = 0. !temporary
-
    j_loop: do j = jts,jte      ! j loop (north-south)
 
       if (log_predictNc) then
@@ -1198,6 +1207,16 @@ END subroutine p3_init
       endif
 
       ssat = 0.  ! note: code for prediction of ssat not currently avaiable
+
+      w_loc(:,:) = w(:,:,j)
+      if (log_aerosols) then
+         naw_loc(:,:) = naw(:,:,j)
+         nai_loc(:,:) = nai(:,:,j)
+         w_loc(:,:)   = max(w_min_act, w_loc(:,:))  ! w is used (only) by ARG droplet activation
+      else
+         naw_loc(:,:) = 300.e+6  ! not used by p3_main without prognostic aerosols
+         nai_loc(:,:) = 0.
+      endif
 
     ! contruct full ice arrays (with dimension n_iceCat) from individual ice category arrays:
       qitot(:,:,1) = qit_1(:,:,j)
@@ -1238,20 +1257,20 @@ END subroutine p3_init
       if (.not. log_liqFrac) qiliq = 0.  !not used, but avoids passing uninialized values
 
       call p3_main( qc(its:ite,kts:kte,j),nc_loc(its:ite,kts:kte),qr(its:ite,kts:kte,j),               &
-                      qnr(its:ite,kts:kte,j),dum_naw(its:ite,kts:kte),dum_nai(its:ite,kts:kte),        &
+                      qnr(its:ite,kts:kte,j),naw_loc(its:ite,kts:kte),nai_loc(its:ite,kts:kte),        &
                       th_old(its:ite,kts:kte,j),th(its:ite,kts:kte,j),                                 &
                       qv_old(its:ite,kts:kte,j),qv(its:ite,kts:kte,j),dt,                              &
                       qitot(its:ite,kts:kte,1:n_iceCat),qirim(its:ite,kts:kte,1:n_iceCat),             &
                       qiliq(its:ite,kts:kte,1:n_iceCat),nitot(its:ite,kts:kte,1:n_iceCat),             &
                       birim(its:ite,kts:kte,1:n_iceCat),zitot(its:ite,kts:kte,1:n_iceCat),             &
-                      ssat(its:ite,kts:kte),w(its:ite,kts:kte,j),p(its:ite,kts:kte,j),                 &
+                      ssat(its:ite,kts:kte),w_loc(its:ite,kts:kte),p(its:ite,kts:kte,j),               &
                       dz(its:ite,kts:kte,j),itimestep,pcprt_liq,pcprt_sol,its,ite,kts,kte,             &
                       n_iceCat,diag_zdbz(its:ite,kts:kte,j),diag_effc(its:ite,kts:kte,j),              &
                       diag_effi(its:ite,kts:kte,1:n_iceCat),diag_vmi(its:ite,kts:kte,1:n_iceCat),      &
                       diag_dmi(its:ite,kts:kte,1:n_iceCat),diag_rhoi(its:ite,kts:kte,1:n_iceCat),      &
                       n_diag2d,diag2d(its:ite,1:n_diag2d),n_diag3d,diag3d(its:ite,kts:kte,1:n_diag3d), &
-                      log_predictNc,trim(model),clbfact_dep,clbfact_sub,log_debug,log_scpf,            &
-                      log_aerosols,scpf_pfrac,scpf_resfact,cldfrac,                                    &
+                      log_predictNc,trim(model),clbfact_dep,clbfact_sub,log_debug,log_aerosols,        &
+                      log_scpf,scpf_pfrac,scpf_resfact,cldfrac,                                        &
                       log_3momentIce = log_3momIce,                                                    &
                       log_LiquidFrac = log_liqFrac,                                                    &
                       prt_drzl = prt_drzl, prt_rain = prt_rain, prt_crys = prt_crys,                   &
@@ -1269,6 +1288,10 @@ END subroutine p3_init
       sr(its:ite,j)      = pcprt_sol(:)/(pcprt_liq(:)+pcprt_sol(:)+1.e-12)         ! solid-to-total ratio
 
       if (log_predictNc) nc(:,:,j) = nc_loc(:,:)
+      if (log_aerosols) then
+         naw(:,:,j) = naw_loc(:,:)
+         nai(:,:,j) = nai_loc(:,:)
+      endif
 
     !set background effective radii (i.e. with no explicit condensate) to prescribed values:
     !  where (qc(:,:,j) < 1.e-14) diag_effc(:,:,j) = 10.e-6
@@ -4341,7 +4364,12 @@ call cpu_time(timer_start(3))
           endif
 
           if (N_nuc.ge.1.e-20) then
-             Q_nuc = N_nuc*mi0 !Note mi0 is 1e-12 in Thompson
+             if (p3_aerosols_iceDeMott) then
+                Q_nuc = N_nuc*mi0 !Note mi0 is 1e-12 in Thompson
+             else
+                ! v5.x expression (same value; its multiplication order keeps aerosols-off bit-identical to v5.x)
+                Q_nuc = max(0.,(dum-sum(nitot(i,k,:)))*mi0*i_dt)
+             endif
              if (nCat>1) then
                 !determine destination ice-phase category:
                 dum1  = 900.     !density of new ice
@@ -4500,6 +4528,37 @@ call cpu_time(timer_start(3))
              nraicol = min(nraicol,na_i(i,k)*i_dt)
           endif
        endif
+
+!.................................................................
+! prognostic aerosols: joint limit on the sinks of na_w and na_i (NOT ACTIVE)
+!
+! Each aerosol sink is limited to na_x/dt above, but not their sum, so na_x can go negative;
+! it is clipped at zero after the update instead (below). The joint scaling is kept here,
+! commented out: for the aerosols themselves it only reproduces the zero; it would matter
+! only for the hydrometeor rates tied to the sinks (qcnuc/ncnuc, qawfrz/nawfrz, qinuc/ninuc).
+
+!      if (p3_aerosols) then
+!         sinks = (ncnuc+nrawcol+sum(niawcol)+sum(nawfrz))*dt
+!         if (sinks.gt.na_w(i,k) .and. sinks.ge.1.e-20) then
+!            ratio   = na_w(i,k)/sinks
+!            ncnuc   = ncnuc*ratio
+!            qcnuc   = qcnuc*ratio
+!            nrawcol = nrawcol*ratio
+!            niawcol = niawcol*ratio
+!            nawfrz  = nawfrz*ratio
+!            qawfrz  = qawfrz*ratio
+!         endif
+!         if (ice_aero) then
+!            sinks = (sum(ninuc)+nraicol+sum(niaicol))*dt
+!            if (sinks.gt.na_i(i,k) .and. sinks.ge.1.e-20) then
+!               ratio   = na_i(i,k)/sinks
+!               ninuc   = ninuc*ratio
+!               qinuc   = qinuc*ratio
+!               nraicol = nraicol*ratio
+!               niaicol = niaicol*ratio
+!            endif
+!         endif
+!      endif
 
 !.................................................................
 ! conservation of mass
@@ -4920,6 +4979,10 @@ call cpu_time(timer_start(3))
           if (ice_aero) then
              na_i(i,k) = na_i(i,k) + (sum(nisub)+sum(nlevp)-sum(ninuc)-nraicol-sum(niaicol))*dt
           endif
+        ! the sinks are limited individually, not jointly, so na_x can go negative: clip at zero
+        ! (see "joint limit on the sinks" above; activation/nucleation are not reduced accordingly)
+          na_w(i,k) = max(0., na_w(i,k))
+          na_i(i,k) = max(0., na_i(i,k))
        endif
 
        qv(i,k) = qv(i,k) + (-qcnuc-qccon-qrcon+qcevp+qrevp)*dt
@@ -9065,7 +9128,7 @@ end function proc_from_LUT_3
   real,    intent(inout), dimension(kts:kte) :: nwfa1d, nifa1d
   real,    intent(inout), dimension(kts:kte) :: thold1d, qvold1d
   real,    intent(inout), dimension(kts:kte) :: t1d
-  real,    intent(in),    dimension(kts:kte) :: p1d, w1d, dzq
+  real,    intent(in),    dimension(kts:kte) :: p1d, w1d, dzq   ! w1d: resolved w (m/s), layer centres
   real,    intent(in),    dimension(kts:kte) :: sigw1d   ! sub-grid w for activation (m/s), layer centres
   real,    intent(inout), dimension(kts:kte) :: zdbz1d, effc1d, effiave1d
   real,    intent(inout), dimension(kts:kte,nCat) :: qit1d, qni1d, qir1d, qib1d, qzi1d, qli1d
@@ -9130,9 +9193,8 @@ end function proc_from_LUT_3
     ! Vertical velocity for droplet activation: resolved w plus sub-grid sigma_w from the PBL
     ! scheme (WRF/CM1 P3 form, w + sigma_w, then floored at 0.1 m/s). Only used by the ARG
     ! activation (p3_aerosols); see README open questions.
-    ! NOTE (to do later): w1d is the resolved w on the LOWER FACE of layer k, while sigw1d and the
-    ! cloud/thermodynamic state are at the layer centre; the resolved w should be averaged to the
-    ! layer centre, 0.5*(w(k)+w(k+1)) (needs w at kte+1 from the driver).
+    ! w1d is the resolved w at the layer centre (averaged from the layer faces in the MPAS driver),
+    ! as sigw1d and the cloud/thermodynamic state.
     uzpl(1,k) = w1d(k)
     if (.not. p3_is_finite(uzpl(1,k))) uzpl(1,k) = 0.
     if (p3_is_finite(sigw1d(k))) uzpl(1,k) = uzpl(1,k) + max(0., sigw1d(k))

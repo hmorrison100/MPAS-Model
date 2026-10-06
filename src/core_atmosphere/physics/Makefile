@@ -238,6 +238,10 @@ mpas_atmphys_sfc_diagnostics.o: \
 	mpas_atmphys_constants.o \
 	mpas_atmphys_vars.o
 
+mpas_atmphys_init_microphysics.o: \
+	mpas_atmphys_p3_cumix.o \
+	mpas_atmphys_utilities.o
+
 mpas_atmphys_p3_cumix.o: \
 	mpas_atmphys_utilities.o
 

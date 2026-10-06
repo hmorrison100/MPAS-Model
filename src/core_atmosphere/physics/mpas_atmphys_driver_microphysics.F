@@ -467,7 +467,7 @@ end subroutine deallocate_microphysics
 
        ! Cold-start initialization of the P3 scalars and, with predicted aerosols (config_p3_aerosols),
        ! of the aerosol numbers nwfa/nifa and their surface source nwfa2d/nifa2d:
-       call init_p3_forMPAS(do_restart,dminfo,state,time_lev)
+       call init_p3_forMPAS(do_restart,dminfo,configs,state,time_lev)
        call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols)
        if(p3_aerosols) call init_p3_aerosols_forMPAS(do_restart,dminfo,mesh,state,time_lev,diag_physics)
        ! P3 lookup tables + parameter initialization (must run before first p3_main call)

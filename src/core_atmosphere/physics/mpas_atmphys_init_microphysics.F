@@ -16,6 +16,7 @@
  use, intrinsic :: ieee_arithmetic
 
  use mpas_atmphys_utilities
+ use mpas_atmphys_p3_cumix,only: p3cu_add_ic_ice
  use module_mp_thompson, only: is_aerosol_aware,naCCN0,naCCN1,naIN0,naIN1,ntb_arc,ntb_arw,ntb_art,ntb_arr, &
                                ntb_ark,tnccn_act
 
@@ -256,15 +257,23 @@
  end subroutine init_thompson_aerosols_forMPAS
 
 !=================================================================================================================
-subroutine init_p3_forMPAS(do_restart,dminfo,state,time_lev)
+subroutine init_p3_forMPAS(do_restart,dminfo,configs,state,time_lev)
 !=================================================================================================================
 !
 ! Cold-start initialization of the P3 prognostic scalars (mp_p3): replaces missing (NaN/Inf) or negative values
-! of the bulk scalars and of the P3 ice-category scalars by zero. The aerosols (nwfa, nifa) are initialized
-! separately in init_p3_aerosols_forMPAS, only if config_p3_aerosols is true.
+! of the bulk scalars and of the P3 ice-category scalars by zero, then initializes the P3 ice consistently with the
+! ice of the initial conditions (p3cu_add_ic_ice):
+! * with config_p3_ic_bulk_ice, the bulk ice qi + qs + qg of the initial conditions (data assimilation analysis or
+!   forecast with another microphysics scheme) is added to the P3 ice as ice detrained by the convection scheme
+!   (config_p3_cu_ri, unrimed, dry), and qi, qs and qg are then set to zero (they stay zero for the whole run).
+!   Without it, qi, qs and qg are not allocated with P3 and the bulk ice of the initial conditions is not read.
+! * with triple-moment ice, the P3 ice of the initial conditions without p3_qzi (double-moment P3) gets p3_qzi.
+! The initial conditions from init_atmosphere have no ice (for any scheme), so that the P3 ice is then zero.
+! The aerosols (nwfa, nifa) are initialized separately in init_p3_aerosols_forMPAS, only if config_p3_aerosols.
 !
 !input variables:
  type(dm_info),intent(in):: dminfo
+ type(mpas_pool_type),intent(in):: configs
  logical,intent(in):: do_restart
  integer,intent(in):: time_lev
 
@@ -272,27 +281,29 @@ subroutine init_p3_forMPAS(do_restart,dminfo,state,time_lev)
  type(mpas_pool_type),intent(inout):: state
 
 !local variables and pointers:
+ logical,pointer:: p3_ic_bulk_ice
  integer,pointer:: index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi,index_p3_qli
  integer,pointer                     :: index_qv, index_qc, index_qr, index_qi, index_qs, index_qg
- integer,pointer                     :: index_nc, index_nr, index_ni
+ integer,pointer                     :: index_nc, index_nr
  integer :: c, nCat_reg
- logical :: p3_present
+ real(kind=RKIND):: qadd_max_local,qadd_max
 
  real(kind=RKIND),dimension(:,:,:),pointer:: scalars
- real(kind=RKIND),dimension(:,:),pointer  :: qv,qc,qr,qi,qs,qg,nc,nr,ni
+ real(kind=RKIND),dimension(:,:),pointer  :: qv,qc,qr,qi,qs,qg,nc,nr
+ real(kind=RKIND),dimension(:,:),allocatable:: qadd
 
 !-----------------------------------------------------------------------------------------------------------------
  call mpas_log_write('--- init_p3_forMPAS: begin', masterOnly=.true.)
 !... if do_restart is true, the P3 scalars are read from the restart file and are not modified:
  if(do_restart) return
 
+ call mpas_pool_get_config(configs,'config_p3_ic_bulk_ice',p3_ic_bulk_ice)
+
  call mpas_pool_get_array(state,'scalars',scalars,time_lev)
  if (.not. associated(scalars)) then
     call physics_error_fatal('init_p3_forMPAS: state%scalars is not associated')
  endif
 
- !
- ! MPAS bulk-compatible bulk microphysics tracers (used for cold-start sanitization and optional P3 seeding)
  call mpas_pool_get_dimension(state,'index_qv',index_qv)
  call mpas_pool_get_dimension(state,'index_qc',index_qc)
  call mpas_pool_get_dimension(state,'index_qr',index_qr)
@@ -301,24 +312,27 @@ subroutine init_p3_forMPAS(do_restart,dminfo,state,time_lev)
  call mpas_pool_get_dimension(state,'index_qg',index_qg)
  call mpas_pool_get_dimension(state,'index_nc',index_nc)
  call mpas_pool_get_dimension(state,'index_nr',index_nr)
- call mpas_pool_get_dimension(state,'index_ni',index_ni)
  if (.not. associated(index_qv) .or. .not. associated(index_qc) .or. .not. associated(index_qr) .or. &
      .not. associated(index_qi) .or. .not. associated(index_qs) .or. .not. associated(index_qg) .or. &
-     .not. associated(index_nc) .or. .not. associated(index_nr) .or. .not. associated(index_ni)) then
+     .not. associated(index_nc) .or. .not. associated(index_nr)) then
     call physics_error_fatal('init_p3_forMPAS: missing one or more bulk scalar indices required by P3')
  endif
 
  qv => scalars(index_qv,:,:)
  qc => scalars(index_qc,:,:)
  qr => scalars(index_qr,:,:)
- ! The bulk qi, qs, qg and ni scalars are not allocated with P3 (index = -1); they are used below only if present.
- nullify(qi,qs,qg,ni)
- if (index_qi > 0) qi => scalars(index_qi,:,:)
- if (index_qs > 0) qs => scalars(index_qs,:,:)
- if (index_qg > 0) qg => scalars(index_qg,:,:)
- if (index_ni > 0) ni => scalars(index_ni,:,:)
  nc => scalars(index_nc,:,:)
  nr => scalars(index_nr,:,:)
+ ! The bulk qi, qs and qg scalars are allocated with P3 only with config_p3_ic_bulk_ice (index = -1 otherwise):
+ nullify(qi,qs,qg)
+ if (p3_ic_bulk_ice) then
+    if (index_qi < 1 .or. index_qs < 1 .or. index_qg < 1) then
+       call physics_error_fatal('init_p3_forMPAS: config_p3_ic_bulk_ice is true but qi, qs or qg is not allocated')
+    endif
+    qi => scalars(index_qi,:,:)
+    qs => scalars(index_qs,:,:)
+    qg => scalars(index_qg,:,:)
+ endif
 
  ! Sanitize any missing/uninitialized (NaN/Inf) or negative values to zero
  where (.not. ieee_is_finite(qv) .or. qv < 0._RKIND .or. qv > 1._RKIND) qv = 0._RKIND
@@ -335,11 +349,7 @@ subroutine init_p3_forMPAS(do_restart,dminfo,state,time_lev)
  end if
  where (.not. ieee_is_finite(nc) .or. nc < 0._RKIND .or. nc > 1.0e12_RKIND) nc = 0._RKIND
  where (.not. ieee_is_finite(nr) .or. nr < 0._RKIND .or. nr > 1.0e12_RKIND) nr = 0._RKIND
- if (associated(ni)) then
-    where (.not. ieee_is_finite(ni) .or. ni < 0._RKIND .or. ni > 1.0e12_RKIND) ni = 0._RKIND
- end if
 
- 
  !-----------------------------------------------------------------------------------------------
  ! On cold start, legacy init files often do not contain the P3 category prognostics.  Ensure they
  ! are defined before dycore moisture bookkeeping (atm_compute_moist_coefficients) and halo exchange
@@ -363,8 +373,6 @@ subroutine init_p3_forMPAS(do_restart,dminfo,state,time_lev)
      call mpas_log_write('--- init_p3_forMPAS: P3 scalar indices (qit,qni,qir,qib,qzi,qli) = $i $i $i $i $i $i', &
                          intArgs=(/index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi,index_p3_qli/))
   endif
- 
- p3_present = .false.
 
  ! Sanitize P3 category prognostics (replace NaN/Inf/negative with 0)
  do c = 0, nCat_reg-1
@@ -381,31 +389,22 @@ subroutine init_p3_forMPAS(do_restart,dminfo,state,time_lev)
     end if
  end do
 
- ! Detect whether P3 category fields are already populated (e.g., restart or IC contains P3 state)
- do c = 0, nCat_reg-1
-    if (maxval(scalars(index_p3_qit+c,:,:)) > 0._RKIND) p3_present = .true.
-    if (maxval(scalars(index_p3_qni+c,:,:)) > 0._RKIND) p3_present = .true.
- end do
-
- if (.not. p3_present) then
-    do c = 0, nCat_reg-1
-       scalars(index_p3_qit+c,:,:) = 0.0_RKIND
-       scalars(index_p3_qni+c,:,:) = 0.0_RKIND
-       scalars(index_p3_qir+c,:,:) = 0.0_RKIND
-       scalars(index_p3_qib+c,:,:) = 0.0_RKIND
-       if (index_p3_qzi > 0) scalars(index_p3_qzi+c,:,:) = 0.0_RKIND
-       if (index_p3_qli > 0) scalars(index_p3_qli+c,:,:) = 0.0_RKIND
-    end do
-
-    ! Seed category-1 P3 ice mass/number from bulk MPAS fields for cold starts, if present. With P3
-    ! the bulk qi/qs/qg/ni scalars are not allocated, so ice in initial-condition files is not read
-    ! and P3 ice starts from zero (known limitation, to be addressed).
-    if (associated(qi)) scalars(index_p3_qit,:,:) = scalars(index_p3_qit,:,:) + qi(:,:)
-    if (associated(qs)) scalars(index_p3_qit,:,:) = scalars(index_p3_qit,:,:) + qs(:,:)
-    if (associated(qg)) scalars(index_p3_qit,:,:) = scalars(index_p3_qit,:,:) + qg(:,:)
-    scalars(index_p3_qit,:,:) = max(0._RKIND, scalars(index_p3_qit,:,:))
-    if (associated(ni)) scalars(index_p3_qni,:,:) = max(0._RKIND, ni(:,:))
- end if
+ ! P3 ice consistent with the ice of the initial conditions:
+ if (p3_ic_bulk_ice) then
+    allocate(qadd(size(scalars,2),size(scalars,3)))
+    qadd(:,:) = qi(:,:) + qs(:,:) + qg(:,:)
+    qadd_max_local = maxval(qadd)
+    call mpas_dmpar_max_real(dminfo,qadd_max_local,qadd_max)
+    call mpas_log_write('--- init_p3_forMPAS: bulk ice qi+qs+qg of the initial conditions added to the P3 ice, max = $r kg/kg', &
+                        realArgs=(/qadd_max/), masterOnly=.true.)
+    call p3cu_add_ic_ice(configs,state,scalars,qadd)
+    deallocate(qadd)
+    qi(:,:) = 0._RKIND
+    qs(:,:) = 0._RKIND
+    qg(:,:) = 0._RKIND
+ else
+    call p3cu_add_ic_ice(configs,state,scalars)
+ endif
 
  !-----------------------------------------------------------------------------------------------
 

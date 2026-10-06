@@ -404,8 +404,8 @@
  qs => scalars(index_qs,:,:)
  qg => scalars(index_qg,:,:)
  if(trim(microp_scheme) == 'mp_p3') then
-    !qi, qs and qg are not allocated with mp_p3: qi_p is the sum over the P3 ice categories of the total
-    !ice mass, and qs_p and qg_p are zero. The P3 scalars mixed by the PBL are copied to p3mix_p.
+    !qi, qs and qg are not allocated with mp_p3 (or are zero, with config_p3_ic_bulk_ice): qi_p is the sum
+    !over the P3 ice categories of the total ice mass, and qs_p and qg_p are zero. The P3 scalars mixed by the PBL are copied to p3mix_p.
     call p3_sum_ice(state,scalars,its,ite)
     qi => p3_qi_sum
     qs => p3_zero_qsqg
@@ -978,7 +978,7 @@ end subroutine pre_microphysics
            p3dbg_banner_printed = .true.
         end if! MPAS bulk-compatible packing of bulk hydrometeors + number concentrations
 ! so downstream MPAS diagnostics and radiation coupling see the same fields as Thompson.
-! qi, qs, qg and ni are not allocated with mp_p3: qi and ni are the sums over the P3 ice categories
+! qi, qs, qg and ni are not allocated with mp_p3 (qi, qs, qg are zero with config_p3_ic_bulk_ice): qi and ni are the sums over the P3 ice categories
 ! of p3_qit and p3_qni, and qs and qg are zero (also used by the tendency diagnostics below).
 call p3_sum_ice(state,scalars,its,ite)
 qi => p3_qi_sum

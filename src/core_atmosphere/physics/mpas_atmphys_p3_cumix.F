@@ -14,7 +14,7 @@
 
  implicit none
  private
- public:: p3cu_add_tend
+ public:: p3cu_add_tend,p3cu_add_ic_ice
 
 !mpas_atmphys_p3_cumix couples the P3 cloud microphysics with the convection schemes. The convection schemes
 !(cu_ntiedtke, cu_tiedtke, cu_grell_freitas, cu_kain_fritsch) return the tendencies of the mass mixing ratios
@@ -48,6 +48,12 @@
 !     removal over one time step is limited to the existing ice.
 !Except for this limit, the mass tendencies are those of the convection schemes, so that the total detrained
 !mass and latent heating are the same as with the other microphysics schemes.
+!
+!p3cu_add_ic_ice applies the same treatment to the ice of the initial conditions at a cold start (called from
+!init_p3_forMPAS): the bulk ice (qi + qs + qg, from a data assimilation analysis or a forecast with another
+!microphysics scheme, config_p3_ic_bulk_ice) is added to the P3 ice as detrained ice (same radius
+!config_p3_cu_ri, density, mu_i, destination category), and, for triple-moment ice, p3_qzi is set for the P3 ice
+!of the initial conditions that has no p3_qzi (a double-moment P3 forecast).
 
  real(kind=RKIND),parameter:: rho_w = 1000._RKIND  !density of detrained droplets and rain (kg m-3), as rhow in P3.
  real(kind=RKIND),parameter:: rho_i =  900._RKIND  !density of detrained ice (kg m-3), as new ice in P3.
@@ -247,6 +253,105 @@
  enddo
 
  end subroutine p3cu_add_tend
+
+!=================================================================================================================
+ subroutine p3cu_add_ic_ice(configs,state,scalars,qadd)
+!=================================================================================================================
+!cold-start initialization of the P3 ice (all cells of the block, including the halo cells):
+! (1) triple-moment ice: P3 ice of the initial conditions without p3_qzi (p3_qit > 0, p3_qni > 0, p3_qzi = 0,
+!     from a double-moment P3 forecast) gets the p3_qzi of mu_i = mu_i_cu, as detrained ice but with the mean-
+!     volume diameter Dv = (6 p3_qit/(pi rho_i p3_qni))**(1/3) of each point: Z = G(mu) 6/(pi rho_i) Dv**3 p3_qit,
+!     so that Y = sqrt(Z p3_qni) = sqrt(G(mu)) 6 p3_qit/(pi rho_i).
+! (2) if qadd is present: the bulk ice qadd (kg kg-1) is added to the P3 ice as an amount of detrained ice (as in
+!     p3cu_add_tend for qiten*dt > 0): to one category (icecat_destination for config_p3_nCat > 1, with the
+!     density rho_i for the existing ice, as P3 has not been called yet), with the number of particles of
+!     radius config_p3_cu_ri, unrimed and dry, and the Z of these particles for triple-moment ice.
+
+!input arguments:
+ type(mpas_pool_type),intent(in):: configs
+ type(mpas_pool_type),intent(in):: state
+ real(kind=RKIND),intent(in),dimension(:,:),optional:: qadd
+
+!inout arguments:
+ real(kind=RKIND),intent(inout),dimension(:,:,:):: scalars
+
+!local variables and pointers:
+ logical,pointer:: p3_trplMomI
+ integer,pointer:: p3_nCat
+ integer,pointer:: index_p3_qit,index_p3_qni,index_p3_qzi
+ real(kind=RKIND),pointer:: p3_cu_ri
+
+ integer:: c,i,k,icat,iqit,iqni,iqzi
+ real(kind=RKIND):: rmass_i,d_cu,deltaD_init,zfac,yfac,dq,n_old,y_old,z_new,n_new
+ real(kind=RKIND),dimension(nCat_max):: qi_cat,di_cat
+
+!-----------------------------------------------------------------------------------------------------------------
+
+ call mpas_pool_get_config(configs,'config_p3_nCat'    ,p3_nCat    )
+ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI)
+ call mpas_pool_get_config(configs,'config_p3_cu_ri'   ,p3_cu_ri   )
+
+ call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
+ call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
+ call mpas_pool_get_dimension(state,'index_p3_qzi',index_p3_qzi)
+
+!(1) triple-moment ice: p3_qzi of the P3 ice of the initial conditions without p3_qzi:
+ if(p3_trplMomI) then
+    yfac = sqrt(G_of_mu(mu_i_cu))*6._RKIND/(pii*rho_i)
+    do c = 1, p3_nCat
+       iqit = index_p3_qit + c - 1
+       iqni = index_p3_qni + c - 1
+       iqzi = index_p3_qzi + c - 1
+       do i = 1, size(scalars,3)
+       do k = 1, size(scalars,2)
+          if(scalars(iqit,k,i) >= qsmall .and. scalars(iqni,k,i) >= nsmall .and. scalars(iqzi,k,i) <= 0._RKIND) &
+             scalars(iqzi,k,i) = yfac*scalars(iqit,k,i)
+       enddo
+       enddo
+    enddo
+ endif
+
+ if(.not. present(qadd)) return
+
+!(2) bulk ice of the initial conditions, as detrained ice:
+ rmass_i = 1._RKIND / (4._RKIND/3._RKIND*pii*rho_i*p3_cu_ri**3)
+ d_cu = 2._RKIND*p3_cu_ri
+ deltaD_init = p3_deltaD_init(p3_nCat)
+ zfac = 0._RKIND
+ if(p3_trplMomI) zfac = G_of_mu(mu_i_cu)*6._RKIND/(pii*rho_i)*(2._RKIND*p3_cu_ri)**3
+
+ do i = 1, size(scalars,3)
+ do k = 1, size(scalars,2)
+    dq = qadd(k,i)
+    if(dq <= 0._RKIND) cycle
+    icat = 1
+    if(p3_nCat > 1) then
+       do c = 1, p3_nCat
+          qi_cat(c) = max(0._RKIND,scalars(index_p3_qit+c-1,k,i))
+          di_cat(c) = 0._RKIND
+          if(qi_cat(c) >= qsmall) &
+             di_cat(c) = (6._RKIND*qi_cat(c)/(pii*rho_i*max(nsmall,scalars(index_p3_qni+c-1,k,i))))**(1._RKIND/3._RKIND)
+       enddo
+       call icecat_destination(qi_cat(1:p3_nCat),di_cat(1:p3_nCat),d_cu,deltaD_init,icat)
+    endif
+    iqit = index_p3_qit + icat - 1
+    iqni = index_p3_qni + icat - 1
+    n_old = max(0._RKIND,scalars(iqni,k,i))
+    scalars(iqit,k,i) = max(0._RKIND,scalars(iqit,k,i)) + dq
+    scalars(iqni,k,i) = n_old + dq*rmass_i
+    if(p3_trplMomI) then
+       !p3_qzi is Y = sqrt(Z N): Z of the existing ice from Y and N, plus that of the added ice:
+       iqzi = index_p3_qzi + icat - 1
+       y_old = max(0._RKIND,scalars(iqzi,k,i))
+       z_new = zfac*dq
+       if(n_old >= nsmall) z_new = z_new + (y_old/n_old)*y_old
+       n_new = scalars(iqni,k,i)
+       scalars(iqzi,k,i) = sqrt(z_new)*sqrt(n_new)
+    endif
+ enddo
+ enddo
+
+ end subroutine p3cu_add_ic_ice
 
 !=================================================================================================================
  end module mpas_atmphys_p3_cumix
