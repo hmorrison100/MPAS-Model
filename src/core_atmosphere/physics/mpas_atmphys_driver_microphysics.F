@@ -921,7 +921,13 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                 nr1d(k) = nr_p(i,k,j)
 
                 p1d(k)  = pres_p(i,k,j)
-                w1d(k)  = w_p(i,k,j)
+                ! w at layer centre: average of the lower and upper faces of layer k;
+                ! w_p is filled for kts:kte only, and w = 0 at the model top (rigid lid)
+                if (k < kte) then
+                   w1d(k) = 0.5_RKIND*(w_p(i,k,j) + w_p(i,k+1,j))
+                else
+                   w1d(k) = 0.5_RKIND*w_p(i,k,j)
+                endif
                 if (.not. ieee_is_finite(w1d(k))) w1d(k) = 0.0_RKIND
                 dz1d(k) = dz_p(i,k,j)
 
