@@ -80,7 +80,7 @@
 
 !local variables and pointers:
  character(len=StrKIND),pointer:: convection_scheme
- logical,pointer:: p3_cu_detrain,p3_predictNc,p3_trplMomI,p3_liqfrac
+ logical,pointer:: p3_predictNc,p3_trplMomI,p3_liqfrac
  integer,pointer:: p3_nCat
  integer,pointer:: index_nc,index_nr,index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi, &
                    index_p3_qli
@@ -97,9 +97,6 @@
  logical:: add_qr,add_qs
 
 !-----------------------------------------------------------------------------------------------------------------
-
- call mpas_pool_get_config(configs,'config_p3_cu_detrain',p3_cu_detrain)
- if(.not. p3_cu_detrain) return
 
  call mpas_pool_get_config(configs,'config_convection_scheme',convection_scheme)
  call mpas_pool_get_config(configs,'config_p3_nCat'          ,p3_nCat          )

@@ -540,7 +540,7 @@ if (len_trim(p3_lookup_file_dir) == 0) then
        call mpas_log_write('--- P3 warm-rain autoconversion/accretion option (autoAccr_param) = $i', &
                            intArgs=(/p3_autoAccr_loc/))
 
-               call p3_init_for_mpas(trim(p3_lookup_file_dir), p3_nCat, p3_trplMomI, p3_liqfrac, &
+               call p3_init_for_mpas(dminfo, trim(p3_lookup_file_dir), p3_nCat, p3_trplMomI, p3_liqfrac, &
                      stat=p3_stat, abort_on_err=p3_abort_on_err, model='WRF', dowr=p3_dowr,    &
                      autoAccr_param_in=p3_autoAccr_loc, &
                      debug_on=p3_debug_on, scpf_on=p3_scpf_on, p3_aerosols=p3_aerosols, &
@@ -643,8 +643,8 @@ real(kind=RKIND), allocatable :: qv_in(:), qc_in(:), qr_in(:), qi_in(:), qs_in(:
  real(kind=RKIND), allocatable :: qit1d(:,:), qni1d(:,:), qir1d(:,:), qib1d(:,:)
  real(kind=RKIND), allocatable :: qzi1d(:,:), qli1d(:,:)
  real(kind=RKIND), allocatable :: vmi1d(:,:), dmi1d(:,:), rhoi1d(:,:), dhmax1d(:,:)
- ! --- P3 bulk ice density per category, saved for the convective detrainment (config_p3_nCat >= 2) ---
- real(kind=RKIND), dimension(:,:,:), pointer :: p3_rhoi
+ ! --- P3 per-category bulk ice density, mass-weighted fall speed and mean diameter (diagnostics) ---
+ real(kind=RKIND), dimension(:,:,:), pointer :: p3_rhoi, p3_vmi, p3_dmi
  real(kind=RKIND) :: qv_min, qv_max, qc_min, qc_max, qr_min, qr_max
 real(kind=RKIND) :: p3_pmin, p3_pmax, p3_pimin, p3_pimax
 real(kind=RKIND) :: rain_step_mm, snow_step_mm, graup_step_mm, ice_step_mm, sr_step
@@ -896,11 +896,13 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
        allocate(qit1d(kts:kte,p3_nCat), qni1d(kts:kte,p3_nCat), qir1d(kts:kte,p3_nCat), qib1d(kts:kte,p3_nCat))
        allocate(qzi1d(kts:kte,p3_nCat), qli1d(kts:kte,p3_nCat))
        allocate(vmi1d(kts:kte,p3_nCat), dmi1d(kts:kte,p3_nCat), rhoi1d(kts:kte,p3_nCat), dhmax1d(kts:kte,p3_nCat))
-       ! Bulk ice density of each category (P3 rhoi, 0 where the category is empty) from this call, used in
-       ! p3cu_add_tend (mpas_atmphys_p3_cumix) to compute the mean diameter of the existing ice when choosing the
-       ! destination category of the convectively detrained ice. Allocated only for config_p3_nCat >= 2.
-       nullify(p3_rhoi)
-       if (p3_nCat >= 2) call mpas_pool_get_array(diag_physics,'p3_rhoi',p3_rhoi)
+       ! Bulk ice density, mass-weighted fall speed and mean diameter of each category (0 where the category is
+       ! empty) from this call, output-only diagnostics dimensioned nIceCat = config_p3_nCat. p3_rhoi is also used
+       ! in p3cu_add_tend (mpas_atmphys_p3_cumix) to compute the mean diameter of the existing ice when choosing
+       ! the destination category of the convectively detrained ice (config_p3_nCat >= 2).
+       call mpas_pool_get_array(diag_physics,'p3_rhoi',p3_rhoi)
+       call mpas_pool_get_array(diag_physics,'p3_vmi' ,p3_vmi )
+       call mpas_pool_get_array(diag_physics,'p3_dmi' ,p3_dmi )
        ! Choose meaning of "old":
        !   - If .false.: old = state at start of the entire microphysics subcycling (baseline)
        rolling_old = .false.
@@ -1374,9 +1376,10 @@ vmi1d(k,c)   = 0.0_RKIND
                    scalars(idx_qib + (c-1), k, i) = qib1d(k,c)
                    if (p3_trplMomI) scalars(idx_qzi + (c-1), k, i) = qzi1d(k,c)
                    if (p3_liqfrac)  scalars(idx_qli + (c-1), k, i) = qli1d(k,c)
-                   ! Per-category diags (vmi/dmi/dhmax) are intentionally not stored full-domain (memory fix);
-                   ! rhoi is stored for config_p3_nCat >= 2 only (needed by the convective detrainment).
-                   if (associated(p3_rhoi)) p3_rhoi(c, k, i) = rhoi1d(k,c)
+                   ! Per-category diagnostics from the last substep (dhmax is not stored)
+                   p3_rhoi(c, k, i) = rhoi1d(k,c)
+                   p3_vmi(c, k, i)  = vmi1d(k,c)
+                   p3_dmi(c, k, i)  = dmi1d(k,c)
                 end do
              end do
 

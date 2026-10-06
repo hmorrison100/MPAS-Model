@@ -40,8 +40,9 @@
 #endif
 #if defined(mpas)
  use mpas_log,           only: mpas_log_write
- use mpas_derived_types, only: MPAS_LOG_CRIT
+ use mpas_derived_types, only: MPAS_LOG_CRIT, dm_info
  use mpas_io_units,      only: mpas_new_unit, mpas_release_unit
+ use mpas_dmpar,         only: mpas_dmpar_bcast_int, mpas_dmpar_bcast_reals
 #endif
 
  implicit none
@@ -69,6 +70,10 @@
  real,    save :: mpas_p3_scpf_pfrac   = 0.0
  real,    save :: mpas_p3_scpf_resfact = 0.0
  integer, save :: mpas_p3_freq3Ddiag   = 0
+
+ ! MPAS domain (MPI) information, set by p3_init_for_mpas: p3_init reads the lookup tables on rank 0 only
+ ! and broadcasts them to the other ranks
+ type(dm_info), save :: mpas_p3_dminfo
 #endif
 
  integer, parameter, public :: STATUS_ERROR  = -1
@@ -484,6 +489,9 @@
 #ifdef ECCCGEM
  call rpn_comm_rank(RPN_COMM_GRID,procnum,istat)
 #endif
+#if defined(mpas)
+ procnum = mpas_p3_dminfo%my_proc_id
+#endif
 
 !-- allocate LUT arrays based on configuration (must run on all PEs before zero-init and broadcast)
  if (trplMomI) then
@@ -556,7 +564,12 @@
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
           print*,'Stopping in P3 init'
+#if defined(mpas)
+          call mpas_log_write('P3_INIT: lookupTable_1 (2-moment ice) version does not match P3', &
+                              messageType=MPAS_LOG_CRIT)
+#else
           stop
+#endif
        endif
     endif
 
@@ -599,7 +612,12 @@
        if (err_abort) then
           print*,'Stopping in P3 init'
           flush(6)
+#if defined(mpas)
+          call mpas_log_write('P3_INIT: error reading lookupTable_1 (2-moment ice)', &
+                              messageType=MPAS_LOG_CRIT)
+#else
           stop
+#endif
        endif
        return
     endif
@@ -614,7 +632,12 @@
          if(owr) print*,'Make sure this file is unzipped and then rerun the model.'
          if(owr) print*,' '
          flush(6)
+#if defined(mpas)
+         call mpas_log_write('P3_INIT: cannot open lookupTable_1 (3-moment ice): '//trim(lookup_file_1), &
+                             messageType=MPAS_LOG_CRIT)
+#else
          stop
+#endif
       end if
 
     !-- check that table version is correct:
@@ -632,7 +655,12 @@
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
           print*,'Stopping in P3 init'
+#if defined(mpas)
+          call mpas_log_write('P3_INIT: lookupTable_1 (3-moment ice) version does not match P3', &
+                              messageType=MPAS_LOG_CRIT)
+#else
           stop
+#endif
        endif
     endif
 
@@ -680,7 +708,12 @@
          if(owr) print*,'Make sure this file is unzipped and then rerun the model.'
          if(owr) print*,' '
          flush(6)
+#if defined(mpas)
+         call mpas_log_write('P3_INIT: cannot open lookupTable_3 (mu_i, 3-moment ice): '//trim(lookup_file_3), &
+                             messageType=MPAS_LOG_CRIT)
+#else
          stop
+#endif
       end if
 
     !-- check that table version is correct:
@@ -698,7 +731,11 @@
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
           print*,'Stopping in P3 init'
+#if defined(mpas)
+          call mpas_log_write('P3_INIT: lookupTable_3 version does not match P3', messageType=MPAS_LOG_CRIT)
+#else
           stop
+#endif
        endif
     endif
 
@@ -741,7 +778,12 @@
           global_status = STATUS_ERROR
           if (trim(model)=='WRF' .or. trim(model) == 'CM1' .or. trim(model)=='KIN1D') then
              print*,'Stopping in P3 init'
+#if defined(mpas)
+             call mpas_log_write('P3_INIT: lookupTable_2 (ice-ice collection, nCat > 1) version does not match P3', &
+                                 messageType=MPAS_LOG_CRIT)
+#else
              stop
+#endif
           endif
        endif
        IF_OKB: if (global_status /= STATUS_ERROR) then
@@ -801,12 +843,19 @@
 #ifdef ECCCGEM
  call rpn_comm_bcast(global_status,1,RPN_COMM_INTEGER,0,RPN_COMM_GRID,istat)
 #endif
+#if defined(mpas)
+ call mpas_dmpar_bcast_int(mpas_p3_dminfo,global_status)
+#endif
 
  if (global_status == STATUS_ERROR) then
     if (err_abort) then
        print*,'Stopping in P3 init'
        flush(6)
+#if defined(mpas)
+       call mpas_log_write('P3_INIT: error in the lookup tables', messageType=MPAS_LOG_CRIT)
+#else
        stop
+#endif
     endif
     return
  endif
@@ -834,6 +883,30 @@
   else
     call rpn_comm_bcast(itabcolli001,size(itabcolli001),RPN_COMM_REAL,0,RPN_COMM_GRID,istat)
     call rpn_comm_bcast(itabcolli002,size(itabcolli002),RPN_COMM_REAL,0,RPN_COMM_GRID,istat)
+  endif
+ endif
+#endif
+#if defined(mpas)
+ !the lookup tables are default real, i.e. real(kind=RKIND) in MPAS (-real-size 64 for double precision)
+ if (trplMomI) then
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itab_3mom_mui),itab_3mom_mui)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itab_3mom),itab_3mom)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcoll_3mom),itabcoll_3mom)
+ else
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itab),itab)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcoll),itabcoll)
+ endif
+
+ if (nCat>1) then
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli001),itabcolli001)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli002),itabcolli002)
+  if (liqfrac) then
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli011),itabcolli011)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli012),itabcolli012)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli101),itabcolli101)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli102),itabcolli102)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli111),itabcolli111)
+    call mpas_dmpar_bcast_reals(mpas_p3_dminfo,size(itabcolli112),itabcolli112)
   endif
  endif
 #endif
@@ -1307,7 +1380,11 @@ END subroutine p3_init
 
    if (global_status /= STATUS_OK) then
       print*,'Stopping in P3, problem in P3 main'
+#if defined(mpas)
+      call mpas_log_write('MP_P3_WRAPPER_WRFCM1: problem in P3_MAIN', messageType=MPAS_LOG_CRIT)
+#else
       stop
+#endif
    endif
 
    END SUBROUTINE mp_p3_wrapper_wrfcm1
@@ -2676,7 +2753,12 @@ call cpu_time(timer_start(1))
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
           print*,'Stopping in P3_MAIN'
+#if defined(mpas)
+          call mpas_log_write('P3_MAIN: p3_aerosols = .true., but the aerosol number mixing ratios are zero or invalid', &
+                              messageType=MPAS_LOG_CRIT)
+#else
           stop
+#endif
        endif
        return
     endif
@@ -7814,7 +7896,11 @@ end function proc_from_LUT_3
      print*,'** DEBUG TRAP IN P3_MAIN, s/r CHECK_VALUES -- source: ',source_ind
      print*
      global_status = STATUS_ERROR
+#if defined(mpas)
+     call mpas_log_write('P3 CHECK_VALUES: debug trap (bad value found)', messageType=MPAS_LOG_CRIT)
+#else
      stop
+#endif
      return
   endif
 
@@ -7892,7 +7978,11 @@ end function proc_from_LUT_3
     print*, 'mom0 = ',mom0
     print*, 'mom3 = ',mom3
     print*, 'mom6 = ',mom6
+#if defined(mpas)
+    call mpas_log_write('P3 COMPUTE_MU_3MOM_1: input moments out of bounds', messageType=MPAS_LOG_CRIT)
+#else
     stop
+#endif
 
  endif
 
@@ -8884,11 +8974,12 @@ end function proc_from_LUT_3
 !==================================================================================================!
 ! MPAS-facing initialization: stores the run-time options used by mp_p3_wrapper_mpas and calls p3_init.
 !==================================================================================================!
- subroutine p3_init_for_mpas(lookup_file_dir, nCat, trplMomI, liqfrac, stat, abort_on_err, model, dowr,  &
+ subroutine p3_init_for_mpas(dminfo, lookup_file_dir, nCat, trplMomI, liqfrac, stat, abort_on_err, model, dowr,  &
                              autoAccr_param_in, debug_on, p3_aerosols, scpf_on, clbfact_dep, clbfact_sub, &
                              scpf_pfrac, scpf_resfact, freq3Ddiag_in, predictNc)
 
   implicit none
+  type(dm_info),    intent(in)            :: dminfo
   character(len=*), intent(in)            :: lookup_file_dir
   integer,          intent(in)            :: nCat
   logical,          intent(in)            :: trplMomI
@@ -8920,6 +9011,7 @@ end function proc_from_LUT_3
   if (present(dowr)) dowr_loc = dowr
   stat_loc = 0
 
+  mpas_p3_dminfo       = dminfo
   mpas_p3_trplMomI     = trplMomI
   mpas_p3_liqfrac      = liqfrac
   mpas_p3_debug_on     = .false.;  if (present(debug_on))      mpas_p3_debug_on     = debug_on
