@@ -48,6 +48,7 @@
 
  private
  public :: p3_main, polysvp1, p3_init
+ public :: icecat_destination, G_of_mu, p3_deltaD_init
 #ifdef ECCCGEM
  public :: mp_p3_wrapper_gem, p3_phybusinit, p3_lwc, p3_iwc
 #else
@@ -2684,20 +2685,7 @@ call cpu_time(timer_start(1))
 ! Determine threshold size difference [m] as a function of nCat
 ! (used for destination category upon ice initiation)
 ! note -- this code could be moved to 'p3_init'
- select case (nCat)
-    case (1)
-       deltaD_init = 999.    !not used if n_iceCat=1 (but should be defined)
-    case (2)
-       deltaD_init = 500.e-6
-    case (3)
-       deltaD_init = 400.e-6
-    case (4)
-       deltaD_init = 235.e-6
-    case (5)
-       deltaD_init = 175.e-6
-    case (6:)
-       deltaD_init = 150.e-6
- end select
+ deltaD_init = p3_deltaD_init(nCat)
 
 ! deltaD_init = 250.e-6   !for testing
 ! deltaD_init = dummy_in   !temporary; passed in from cld1d
@@ -6837,6 +6825,40 @@ end function proc_from_LUT_3
        isnan = (arg1 .ne. arg1)
        return
  end function isnan
+
+!==========================================================================================!
+ real function p3_deltaD_init(nCat)
+
+ !--------------------------------------------------------------------------------------!
+ ! Returns the threshold size difference [m], as a function of the number of ice
+ ! categories, used to determine the destination category of new ice (deltaD_init in
+ ! icecat_destination). Public so that host models adding new ice outside of p3_main
+ ! (e.g. convective detrainment) use the same value as P3.
+ !--------------------------------------------------------------------------------------!
+
+ implicit none
+
+! arguments:
+ integer, intent(in) :: nCat
+
+ select case (nCat)
+    case (1)
+       p3_deltaD_init = 999.    !not used if n_iceCat=1 (but should be defined)
+    case (2)
+       p3_deltaD_init = 500.e-6
+    case (3)
+       p3_deltaD_init = 400.e-6
+    case (4)
+       p3_deltaD_init = 235.e-6
+    case (5)
+       p3_deltaD_init = 175.e-6
+    case (6:)
+       p3_deltaD_init = 150.e-6
+    case default
+       p3_deltaD_init = 999.
+ end select
+
+ end function p3_deltaD_init
 
 !==========================================================================================!
  subroutine icecat_destination(Qi,Di,D_nuc,deltaD_init,iice_dest)

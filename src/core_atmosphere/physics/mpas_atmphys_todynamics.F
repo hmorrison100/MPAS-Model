@@ -150,6 +150,8 @@
 
  real(kind=RKIND),dimension(:,:),allocatable:: tend_th
 
+ type(mpas_pool_type),pointer:: diag_physics
+
 !=================================================================================================================
 
  call mpas_pool_get_dimension(mesh,'nCells',nCells)
@@ -271,8 +273,10 @@
     call p3pbl_add_tend(configs,state,tend_physics,mass,tend_scalars,nCellsSolve,nVertLevels)
 
 !mp_p3: convective detrainment of cloud water number and ice into the P3 prognostic scalars:
- if(trim(microp_scheme) == 'mp_p3' .and. convection_scheme .ne. 'off') &
-    call p3cu_add_tend(configs,state,tend_physics,mass,tend_scalars,nCellsSolve,nVertLevels)
+ if(trim(microp_scheme) == 'mp_p3' .and. convection_scheme .ne. 'off') then
+    call mpas_pool_get_subpool(block%structs,'diag_physics',diag_physics)
+    call p3cu_add_tend(configs,state,diag_physics,tend_physics,mass,scalars,tend_scalars,nCellsSolve,nVertLevels)
+ endif
 
 !clean up any pointers that were allocated with zero size before the call to physics_get_tend_work:
  if(size(rucuten) == 0 ) deallocate(rucuten )
