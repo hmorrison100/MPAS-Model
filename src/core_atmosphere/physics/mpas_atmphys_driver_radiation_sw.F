@@ -371,7 +371,7 @@
 
 !local variables:
  integer:: i,j,k,n
- real(kind=RKIND):: qi_p3_in,qs_p3_in,rei_native,rei_um,snow_mass_factor
+ real(kind=RKIND):: rei_native,rei_um
 
 !local pointers:
  logical,pointer:: config_o3climatology
@@ -503,11 +503,10 @@
                    call mpas_pool_get_array(diag_physics, 're_cloud', re_cloud)
                    call mpas_pool_get_array(diag_physics, 're_ice',   re_ice)
 
-                   ! Port the original WRF P3 + RRTMG special handling directly into the
-                   ! MPAS radiation driver.  Route nearly all P3 cloud-ice mass through the
-                   ! snow-optics path, keep a small overlap in the cloud-ice path, and bound
-                   ! the snow generalized effective size the same way the WRF RRTMG wrapper
-                   ! does before the optics lookup tables are used.
+                   ! P3 ice goes through the RRTMG snow optics with the P3 effective radius (re_ice), bounded to
+                   ! 10-130 microns. The ice mass was moved to the radiative snow (qsrad_p), once for both the
+                   ! short wave and long wave codes, in driver_cloudiness (p3_ice_to_radiative_snow), which also
+                   ! scales the mass by 130/re_ice for re_ice > 130 microns; the radiative cloud ice is zero.
                    has_reqc = 1
                    has_reqi = 1
                    has_reqs = 1
@@ -536,18 +535,11 @@
                             end if
                             rei_um = rei_native * 1.0e6_RKIND
 
-                            snow_mass_factor = 0.99_RKIND
                             if (rei_um > 130.0_RKIND) then
-                               snow_mass_factor = min(snow_mass_factor, (130.0_RKIND/rei_um)*(130.0_RKIND/rei_um))
                                resnow_p(i,k,j) = 130.0e-6_RKIND
                             else
                                resnow_p(i,k,j) = max(10.0e-6_RKIND, rei_native)
                             end if
-
-                            qi_p3_in = max(qirad_p(i,k,j), 0._RKIND)
-                            qs_p3_in = max(qsrad_p(i,k,j), 0._RKIND)
-                            qsrad_p(i,k,j) = qs_p3_in + qi_p3_in * snow_mass_factor
-                            qirad_p(i,k,j) = qi_p3_in * (1.0_RKIND - snow_mass_factor)
 
                             reice_p(i,k,j) = 10.0e-6_RKIND
 
