@@ -3514,15 +3514,6 @@ call cpu_time(timer_start(3))
             iceice_interaction1:  if (iice.ge.2) then
    !        iceice_interaction1:  if (.false.) then       !for testing (to suppress ice-ice interaction)
 
-            !note:  In this version, lookupTable_2 (LT2, for ice category interactions) is computed for a maximum
-            !       mean ice size of Dm_max=2000.e-6 m (the old lambda_i limiter); thus it is compatible with
-            !       use of LT1-v5.2_2momI (with Dm_max=2000.e-6) [i.e. for log_3momentIce=.false.] but not with
-            !       LT1-v5.3_3momI (with Dm_max=400000.e-6).  This means that this version can still be
-            !       run with the 3momI + nCat>1 configuration, but the ice-ice interactions between different
-            !       categories (in this 'iceice_interaction1' block) is suppressed.
-            !       In a forthcoming version, both LT1-2momI and LT2 (and LT1-3momI) will all be computed
-            !       using the unconstrained size limited (i.e. Dm_max=400000.e-6).
-
                 qitot_notsmall: if (qitot(i,k,iice).ge.qsmall) then
                    catcoll_loop: do catcoll = 1,iice-1
                       qitotcatcoll_notsmall: if (qitot(i,k,catcoll).ge.qsmall) then
@@ -9029,11 +9020,6 @@ end function proc_from_LUT_3
 ! Open questions are listed in interfaces/mpas/README.md.
 !==================================================================================================!
 
- pure elemental logical function p3_is_finite(x) result(ok)
-    real, intent(in) :: x
-    ok = (x == x) .and. (abs(x) < huge(x))
- end function p3_is_finite
-
 !==================================================================================================!
 ! MPAS-facing initialization: stores the run-time options used by mp_p3_wrapper_mpas and calls p3_init.
 !==================================================================================================!
@@ -9146,7 +9132,7 @@ end function proc_from_LUT_3
 
   logical :: log_predictNc, debug_on, p3_aerosols, scpf_on
   real    :: clbfact_dep, clbfact_sub, scpf_pfrac, scpf_resfact, nccnst_use, supi_nuc_use
-  real    :: p_local, pratio, t_local, sum_qi, sum_qi_over_re, qsum_ice
+  real    :: sigw_local, pratio, sum_qi, sum_qi_over_re, qsum_ice
 
   real, dimension(its:ite,kts:kte)          :: qc, nc, qr, nr, na_w, na_i
   real, dimension(its:ite,kts:kte)          :: th_old, th, qv_old, qv
@@ -9178,60 +9164,54 @@ end function proc_from_LUT_3
   diag2d = 0.; diag3d = 0.; qi_type = 0.
 
   ! pack the MPAS column into P3 slabs
-  ! (Stanford's defensive handling kept for now: non-finite inputs are replaced by defaults.)
+  ! The inputs are passed to p3_main as they are, as for the other MPAS microphysics schemes: non-finite
+  ! values (NaN/Inf) are not replaced, and negative values are not clipped here (p3_main clips qv and moves
+  ! small or negative qc, qr and qitot to the vapour).
   do k = kts, kte
-    qc(1,k) = max(qc1d(k), 0.);  if (.not. p3_is_finite(qc(1,k))) qc(1,k) = 0.
-    nc(1,k) = max(nc1d(k), 0.);  if (.not. p3_is_finite(nc(1,k))) nc(1,k) = 0.
-    qr(1,k) = max(qr1d(k), 0.);  if (.not. p3_is_finite(qr(1,k))) qr(1,k) = 0.
-    nr(1,k) = max(nr1d(k), 0.);  if (.not. p3_is_finite(nr(1,k))) nr(1,k) = 0.
-    qv(1,k) = max(qv1d(k), 0.);  if (.not. p3_is_finite(qv(1,k))) qv(1,k) = 0.
+    qc(1,k) = qc1d(k)
+    nc(1,k) = nc1d(k)
+    qr(1,k) = qr1d(k)
+    nr(1,k) = nr1d(k)
+    qv(1,k) = qv1d(k)
 
-    p_local = p1d(k)
-    if (.not. p3_is_finite(p_local) .or. p_local <= 1.) p_local = p0
-    pres(1,k) = p_local
+    pres(1,k) = p1d(k)
 
     ! Vertical velocity for droplet activation: resolved w plus sub-grid sigma_w from the PBL
     ! scheme (WRF/CM1 P3 form, w + sigma_w, then floored at 0.1 m/s). Only used by the ARG
     ! activation (p3_aerosols); see README open questions.
     ! w1d is the resolved w at the layer centre (averaged from the layer faces in the MPAS driver),
     ! as sigw1d and the cloud/thermodynamic state.
-    uzpl(1,k) = w1d(k)
-    if (.not. p3_is_finite(uzpl(1,k))) uzpl(1,k) = 0.
-    if (p3_is_finite(sigw1d(k))) uzpl(1,k) = uzpl(1,k) + max(0., sigw1d(k))
-    uzpl(1,k) = max(0.1, uzpl(1,k))
+    ! (the bounds are written as comparisons, which leave NaN unchanged; max/min may not)
+    sigw_local = sigw1d(k)
+    if (sigw_local < 0.) sigw_local = 0.
+    uzpl(1,k) = w1d(k) + sigw_local
+    if (uzpl(1,k) < 0.1) uzpl(1,k) = 0.1
 
     dzq2(1,k) = dzq(k)
-    if (.not. p3_is_finite(dzq2(1,k)) .or. dzq2(1,k) <= 0.) dzq2(1,k) = 1.
 
-    t_local = t1d(k)
-    if (.not. p3_is_finite(t_local)) t_local = 300.
     pratio = p0/pres(1,k)
-    th(1,k) = t_local*pratio**kappa
+    th(1,k) = t1d(k)*pratio**kappa
 
     th_old(1,k) = thold1d(k)
-    if (.not. p3_is_finite(th_old(1,k))) th_old(1,k) = th(1,k)
     qv_old(1,k) = qvold1d(k)
-    if (.not. p3_is_finite(qv_old(1,k)) .or. qv_old(1,k) < 0.) qv_old(1,k) = qv(1,k)
 
     if (p3_aerosols) then   ! number mixing ratios, # kg-1
-       na_w(1,k) = max(nwfa1d(k), 0.);  if (.not. p3_is_finite(na_w(1,k))) na_w(1,k) = 1.e7
-       na_i(1,k) = max(nifa1d(k), 0.);  if (.not. p3_is_finite(na_i(1,k))) na_i(1,k) = 1.e4
-       na_w(1,k) = max(1.e6, min(1.e11, na_w(1,k)))
-       na_i(1,k) = max(1.e3, min(1.e10, na_i(1,k)))
+       na_w(1,k) = nwfa1d(k)
+       na_i(1,k) = nifa1d(k)
+       if (na_w(1,k) < 1.e6)  na_w(1,k) = 1.e6
+       if (na_w(1,k) > 1.e11) na_w(1,k) = 1.e11
+       if (na_i(1,k) < 1.e3)  na_i(1,k) = 1.e3
+       if (na_i(1,k) > 1.e10) na_i(1,k) = 1.e10
     endif
 
     qsum_ice = 0.
     do c = 1, nCat
-      qitot(1,k,c) = max(qit1d(k,c), 0.);  if (.not. p3_is_finite(qitot(1,k,c))) qitot(1,k,c) = 0.
-      nitot(1,k,c) = max(qni1d(k,c), 0.);  if (.not. p3_is_finite(nitot(1,k,c))) nitot(1,k,c) = 0.
-      qirim(1,k,c) = max(qir1d(k,c), 0.);  if (.not. p3_is_finite(qirim(1,k,c))) qirim(1,k,c) = 0.
-      birim(1,k,c) = max(qib1d(k,c), 0.);  if (.not. p3_is_finite(birim(1,k,c))) birim(1,k,c) = 0.
-      if (mpas_p3_liqfrac) then
-         qiliq(1,k,c) = max(qli1d(k,c), 0.);  if (.not. p3_is_finite(qiliq(1,k,c))) qiliq(1,k,c) = 0.
-      endif
-      if (mpas_p3_trplMomI) then
-         zitot(1,k,c) = max(qzi1d(k,c), 0.);  if (.not. p3_is_finite(zitot(1,k,c))) zitot(1,k,c) = 0.
-      endif
+      qitot(1,k,c) = qit1d(k,c)
+      nitot(1,k,c) = qni1d(k,c)
+      qirim(1,k,c) = qir1d(k,c)
+      birim(1,k,c) = qib1d(k,c)
+      if (mpas_p3_liqfrac)  qiliq(1,k,c) = qli1d(k,c)
+      if (mpas_p3_trplMomI) zitot(1,k,c) = qzi1d(k,c)
       qsum_ice = qsum_ice + qitot(1,k,c) + qiliq(1,k,c)
     enddo
     cldfrac(1,k) = merge(1., 0., (qc(1,k) + qr(1,k) + qsum_ice) > 1.e-12)   ! 0/1, as in WRF
@@ -9275,8 +9255,8 @@ end function proc_from_LUT_3
     nr1d(k) = nr(1,k)
     qv1d(k) = qv(1,k)
     if (p3_aerosols) then
-       nwfa1d(k) = max(na_w(1,k), 0.)
-       nifa1d(k) = max(na_i(1,k), 0.)
+       nwfa1d(k) = na_w(1,k)
+       nifa1d(k) = na_i(1,k)
     endif
     t1d(k) = th(1,k)*(p1d(k)/p0)**kappa
     do c = 1, nCat
@@ -9308,10 +9288,10 @@ end function proc_from_LUT_3
     enddo
     if (sum_qi > 0. .and. sum_qi_over_re > 0.) effiave1d(k) = sum_qi/sum_qi_over_re
 
-    qi1d(k) = max(sum(qitot(1,k,1:nCat)), 0.)
+    qi1d(k) = sum(qitot(1,k,1:nCat))
     qs1d(k) = 0.
     qg1d(k) = 0.
-    ni1d(k) = sum(max(nitot(1,k,1:nCat), 0.))
+    ni1d(k) = sum(nitot(1,k,1:nCat))
   enddo
 
   pptrain  = pptrain + (prt_liq(1) + prt_sol(1))*1000.*dt

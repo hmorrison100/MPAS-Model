@@ -24,7 +24,6 @@
  use mpas_timer, only: mpas_timer_start, mpas_timer_stop
  use mpas_atmphys_utilities, only: physics_error_fatal
  use mpas_atmphys_p3_pblmix, only: allocate_p3pbl,deallocate_p3pbl,p3pbl_from_MPAS
- use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 
  implicit none
  private
@@ -737,18 +736,13 @@ end subroutine pre_microphysics
  integer :: nScalarTot
  integer :: nCat_layout
 
- integer, parameter :: P3DBG_MAX_BAD_INPUT = 10, P3DBG_MAX_EOS_RECON = 10
- integer, save :: p3dbg_bad_input_n = 0
- integer, save :: p3dbg_eos_recon_n = 0
  logical, save :: p3dbg_banner_printed = .false.
  logical, save :: p3dbg_to_indices_checked = .false.
- logical, save :: p3dbg_supp_bad_input_msg = .false.
- logical, save :: p3dbg_supp_eos_msg = .false.
  character(len=1024) :: dbgmsg
 
 
  real(kind=RKIND) :: p3_kappa, p3_inv1mk
- real(kind=RKIND) :: pi_tmp, pres_tmp, moistfac, qvpos
+ real(kind=RKIND) :: moistfac, qvpos
  real(kind=RKIND) :: rho_d_tmp
  ! --- P3 config ---
  integer, pointer :: p3_nCat
@@ -796,89 +790,12 @@ end subroutine pre_microphysics
     qc_p(i,k,j) = qc(k,i)
     qr_p(i,k,j) = qr(k,i)
 
+    rho_p(i,k,j)  = zz(k,i) * rho_zz(k,i)
+    th_p(i,k,j)   = theta_m(k,i) / (1._RKIND + R_v/R_d * max(0._RKIND,qv_p(i,k,j)))
 
-    if (trim(mp_scheme) == 'mp_p3') then
-    ! P3 input safety: log and (if allowed) fall back to safe values for any non-finite dynamics fields.
-       if ( (.not. ieee_is_finite(theta_m(k,i)) .or. theta_m(k,i) <= 0._RKIND) .or. &
-    (.not. ieee_is_finite(rho_zz(k,i))  .or. rho_zz(k,i)  <= 0._RKIND) .or. &
-    (.not. ieee_is_finite(zz(k,i))      .or. zz(k,i)      <= 0._RKIND) ) then
-          if (p3dbg_bad_input_n < P3DBG_MAX_BAD_INPUT) then
-             write(dbgmsg,'(A,3I10)') 'P3DBG_BAD_INPUT_MPAS2PHY (j,i,k)=', j,i,k
-             call mpas_log_write(trim(dbgmsg))
-             write(dbgmsg,'(A,1X,ES12.4,1X,ES12.4,1X,ES12.4)') '  zz rho_zz theta_m=', zz(k,i), rho_zz(k,i), theta_m(k,i)
-             call mpas_log_write(trim(dbgmsg))
-             p3dbg_bad_input_n = p3dbg_bad_input_n + 1
-           if (p3dbg_bad_input_n == P3DBG_MAX_BAD_INPUT .and. .not. p3dbg_supp_bad_input_msg) then
-              call mpas_log_write('P3DBG_BAD_INPUT_MPAS2PHY: further occurrences suppressed')
-              p3dbg_supp_bad_input_msg = .true.
-           end if
-          end if
-          if ((associated(p3_debug_on) .and. p3_debug_on)) then
-             write(dbgmsg,'(A,3I10)') 'P3DBG_ABORT_ON_BAD_INPUT_DEBUG_ON (j,i,k)=', j,i,k
-             call mpas_log_write(trim(dbgmsg))
-             call physics_error_fatal(trim(dbgmsg))
-          end if
-       end if
+    pi_p(i,k,j)   = exner(k,i)
+    pres_p(i,k,j) = pressure_b(k,i) + pressure_p(k,i)
 
-
-    ! P3 input packing with guards for invalid dynamics fields
-    block
-       real(kind=RKIND) :: rho_use, th_use
-       rho_use = zz(k,i) * rho_zz(k,i)
-       if (.not. ieee_is_finite(rho_use) .or. rho_use <= 0._RKIND) rho_use = 1._RKIND
-       rho_p(i,k,j) = rho_use
-
-       th_use = theta_m(k,i)
-       if (.not. ieee_is_finite(th_use)) th_use = 300._RKIND
-       th_use = th_use / (1._RKIND + R_v/R_d * max(0._RKIND, qv_p(i,k,j)))
-       if (.not. ieee_is_finite(th_use) .or. th_use <= 0._RKIND) th_use = 300._RKIND
-       th_p(i,k,j) = th_use
-    end block
-       ! P3: use MPAS diagnostic exner/pressure when valid (MPAS-compatible); otherwise fall back safely.
-       pres_tmp = pressure_b(k,i) + pressure_p(k,i)
-       if ((pres_tmp /= pres_tmp) .or. (pres_tmp <= 0._RKIND) .or. (abs(pres_tmp) > 1.0e9_RKIND)) then
-          pres_tmp = pressure_b(k,i)
-       end if
-       if ((pres_tmp /= pres_tmp) .or. (pres_tmp <= 0._RKIND) .or. (abs(pres_tmp) > 1.0e9_RKIND)) then
-          pres_tmp = 100000._RKIND
-       end if
-       pi_tmp = exner(k,i)
-       if ((pi_tmp /= pi_tmp) .or. (pi_tmp <= 0._RKIND) .or. (abs(pi_tmp) > 1.0e3_RKIND)) then
-          pi_tmp = (pres_tmp/100000._RKIND)**(R_d/cp)
-       end if
-       pi_p(i,k,j)   = pi_tmp
-       pres_p(i,k,j) = pres_tmp
-
-       ! Definite fix: if MPAS rho_zz is invalid (NaN/<=0), do not pass a hard-coded density to P3.
-       ! Rebuild physical density from EOS using (p,pi,theta_m): rho = p / (R_d * pi * theta_m).
-       if (.not. ieee_is_finite(rho_zz(k,i)) .or. rho_zz(k,i) <= 0._RKIND) then
-          ! th_use is scoped within the block above; use the already-populated microphysics theta field.
-          if (ieee_is_finite(pres_tmp)     .and. pres_tmp     > 0._RKIND .and. &
-              ieee_is_finite(pi_tmp)       .and. pi_tmp       > 0._RKIND .and. &
-              ieee_is_finite(th_p(i,k,j))  .and. th_p(i,k,j)  > 0._RKIND) then
-             rho_p(i,k,j) = pres_tmp / (R_d * pi_tmp * th_p(i,k,j))
-          end if
-          if (.not. ieee_is_finite(rho_p(i,k,j)) .or. rho_p(i,k,j) <= 0._RKIND) rho_p(i,k,j) = 1._RKIND
-       end if
-       if ( ((exner(k,i) /= exner(k,i)) .or. (pressure_p(k,i) /= pressure_p(k,i))) .and. &
-     (p3dbg_eos_recon_n < P3DBG_MAX_EOS_RECON) ) then
-          write(dbgmsg,'(A,3I10,10(1X,ES12.4))') &
-               'P3DBG_EOS_RECON j i k pb pp exn p pi rho th zz qv qc=', j,i,k, &
-               pressure_b(k,i), pressure_p(k,i), exner(k,i), pres_tmp, pi_tmp, &
-               rho_zz(k,i), theta_m(k,i), zz(k,i), qv_p(i,k,j), qc_p(i,k,j)
-          call mpas_log_write(trim(dbgmsg))
-          p3dbg_eos_recon_n = p3dbg_eos_recon_n + 1
-          if (p3dbg_eos_recon_n == P3DBG_MAX_EOS_RECON .and. .not. p3dbg_supp_eos_msg) then
-             call mpas_log_write('P3DBG_EOS_RECON: further occurrences suppressed')
-             p3dbg_supp_eos_msg = .true.
-          end if
-       end if
-    else
-       rho_p(i,k,j)  = zz(k,i) * rho_zz(k,i)
-       th_p(i,k,j)   = theta_m(k,i) / (1._RKIND + R_v/R_d * max(0._RKIND,qv_p(i,k,j)))
-       pi_p(i,k,j)   = exner(k,i)
-       pres_p(i,k,j) = pressure_b(k,i) + pressure_p(k,i)
-    end if
     z_p(i,k,j)    = zgrid(k,i)
     dz_p(i,k,j)   = zgrid(k+1,i) - zgrid(k,i)
     w_p(i,k,j)    = w(k,i)
@@ -1240,9 +1157,6 @@ enddo
 !local variables:
 
  ! P3 log throttles (avoid multi-GB logs)
-  integer, parameter :: P3DBG_MAX_BAD_INPUT = 10
-  integer, save :: p3dbg_bad_input_n = 0
-  logical, save :: p3dbg_supp_bad_input_msg = .false.
   logical, save :: p3dbg_to_indices_checked = .false.
 
 ! P3 debug / safety logging locals
@@ -1250,10 +1164,8 @@ enddo
  integer :: nScalarTot_loc, nScalar1_loc, nScalar2_loc, nScalar3_loc
  logical :: p3_index_ok
  integer:: icount
- integer :: ios
  integer:: i,k,j,c
- real(kind=RKIND):: rho1,rho2,tem1,tem2,arg_exner
- real(kind=RKIND):: theta_old, qv_old
+ real(kind=RKIND):: rho1,rho2,tem1,tem2
 
  ! --- P3 config ---
  integer, pointer :: p3_nCat
@@ -1317,24 +1229,10 @@ enddo
  do k = kts,mp_top_level
  do i = its,ite
 
-    if (trim(mp_scheme) == 'mp_p3') then
-       ! P3-only guard: never allow NaNs from the pre-microphysics state to contaminate tendencies.
-       theta_old = theta_m(k,i)
-       qv_old    = qv(k,i)
-       if (.not. ieee_is_finite(theta_old) .or. theta_old <= 0._RKIND) then
-          theta_old = th_p(i,k,j) * (1._RKIND + rvord*max(0._RKIND, qv_p(i,k,j)))
-       end if
-       if (.not. ieee_is_finite(qv_old) .or. qv_old < 0._RKIND) then
-          qv_old = max(0._RKIND, qv_p(i,k,j))
-       end if
-       rt_diabatic_tend(k,i) = theta_old
-       dtheta_dt_mp(k,i)     = theta_old/(1._RKIND+rvord*qv_old)
-    else
-       !initializes tendency of coupled potential temperature potential temperature, and
-       !potential temperature heating rate from microphysics:
-       rt_diabatic_tend(k,i) = theta_m(k,i)
-       dtheta_dt_mp(k,i)     = theta_m(k,i)/(1._RKIND+rvord*qv(k,i))
-    end if
+    !initializes tendency of coupled potential temperature potential temperature, and
+    !potential temperature heating rate from microphysics:
+    rt_diabatic_tend(k,i) = theta_m(k,i)
+    dtheta_dt_mp(k,i)     = theta_m(k,i)/(1._RKIND+rvord*qv(k,i))
 
     !updates water vapor, cloud liquid water, rain mixing ratios, modified potential temperature,
     !tendency of coupled potential temperature, and potential temperature heating rate from microphysics:
@@ -1342,123 +1240,19 @@ enddo
     qc(k,i) = qc_p(i,k,j)
     qr(k,i) = qr_p(i,k,j)
 
-
-    if (trim(mp_scheme) == 'mp_p3') then
-       if ( .not. ieee_is_finite(th_p(i,k,j)) .or. &
-     .not. ieee_is_finite(qv_p(i,k,j)) .or. &
-     .not. ieee_is_finite(qc_p(i,k,j)) .or. &
-     .not. ieee_is_finite(qr_p(i,k,j)) ) then
-          write(dbgmsg,'(A,3I10)') 'P3DBG_BAD_PHY2MPAS_STATE (j,i,k)=', j,i,k
-          call mpas_log_write(trim(dbgmsg))
-          write(dbgmsg,'(A,1X,ES12.4,1X,ES12.4,1X,ES12.4,1X,ES12.4)') &
-     '  th qv qc qr=', th_p(i,k,j), qv_p(i,k,j), qc_p(i,k,j), qr_p(i,k,j)
-          call mpas_log_write(trim(dbgmsg))
-          if ((associated(p3_debug_on) .and. p3_debug_on)) then
-             call physics_error_fatal('P3DBG_ABORT_ON_BAD_PHY2MPAS_STATE (see prior logs)')
-          end if
-          ! hard reset to safe values if continuing
-          if (.not. ieee_is_finite(th_p(i,k,j)) .or. th_p(i,k,j) <= 0._RKIND) th_p(i,k,j) = 300._RKIND
-          if (.not. ieee_is_finite(qv_p(i,k,j)) .or. qv_p(i,k,j) < 0._RKIND) qv_p(i,k,j) = 0._RKIND
-          if (.not. ieee_is_finite(qc_p(i,k,j)) .or. qc_p(i,k,j) < 0._RKIND) qc_p(i,k,j) = 0._RKIND
-          if (.not. ieee_is_finite(qr_p(i,k,j)) .or. qr_p(i,k,j) < 0._RKIND) qr_p(i,k,j) = 0._RKIND
-       end if
-    end if
-
     theta_m(k,i) = th_p(i,k,j) * (1._RKIND+rvord*qv_p(i,k,j))
     rt_diabatic_tend(k,i) = (theta_m(k,i) - rt_diabatic_tend(k,i))/dt_dyn
     dtheta_dt_mp(k,i)     = (theta_m(k,i)/(1._RKIND+rvord*qv(k,i))-dtheta_dt_mp(k,i))/(dt_dyn)
 
-    if (trim(mp_scheme) == 'mp_p3') then
-    ! Definite fix: if rho_zz is invalid here, rtheta/exner/pressure will become NaN and
-    ! immediately poison the dynamical core. Repair rho_zz from EOS using the (sanitized)
-    ! physics-grid pressure/exner and the updated theta_m.
-    if (.not. ieee_is_finite(rho_zz(k,i)) .or. rho_zz(k,i) <= 0._RKIND) then
-       if (ieee_is_finite(pres_p(i,k,j)) .and. pres_p(i,k,j) > 0._RKIND .and. &
-           ieee_is_finite(pi_p(i,k,j))   .and. pi_p(i,k,j)   > 0._RKIND .and. &
-           ieee_is_finite(theta_m(k,i))  .and. theta_m(k,i)  > 0._RKIND .and. &
-           ieee_is_finite(zz(k,i))       .and. zz(k,i)       > 0._RKIND) then
-          rho_zz(k,i) = pres_p(i,k,j) / (zz(k,i) * R_d * pi_p(i,k,j) * theta_m(k,i))
-       end if
-       if (.not. ieee_is_finite(rho_zz(k,i)) .or. rho_zz(k,i) <= 0._RKIND) rho_zz(k,i) = 1._RKIND
-       if (associated(p3_debug_on) .and. p3_debug_on) then
-          if (p3dbg_bad_input_n < P3DBG_MAX_BAD_INPUT) then
-             p3dbg_bad_input_n = p3dbg_bad_input_n + 1
-             write(dbgmsg,'(A,3I10)') 'P3DBG_REPAIR_RHO_ZZ (j,i,k)=', j,i,k
-             call mpas_log_write(trim(dbgmsg), MPAS_LOG_WARN)
-             write(dbgmsg,'(A,1X,ES12.4)') '  rho_zz (EOS rebuilt)=', rho_zz(k,i)
-             call mpas_log_write(trim(dbgmsg), MPAS_LOG_WARN)
-          end if
-       end if
-    end if
-
-    end if
-
     !density-weighted perturbation potential temperature:
     rtheta_p(k,i) = rho_zz(k,i) * theta_m(k,i) - rtheta_b(k,i)
 
-    if (trim(mp_scheme) == 'mp_p3') then
-!exner function (guarded):
-arg_exner = zz(k,i)*(R_d/P0)*(rtheta_p(k,i)+rtheta_b(k,i))
+    !exner function:
+    exner(k,i) = (zz(k,i)*(R_d/P0)*(rtheta_p(k,i)+rtheta_b(k,i)))**rcv
 
-if ((arg_exner /= arg_exner) .or. (abs(arg_exner) > 1.0e30_RKIND) .or. (arg_exner <= 0.0_RKIND) .or. &
-    (zz(k,i) /= zz(k,i)) .or. (abs(zz(k,i)) > 1.0e30_RKIND) .or. (zz(k,i) == 0.0_RKIND) .or. &
-    (rtheta_p(k,i) /= rtheta_p(k,i)) .or. (abs(rtheta_p(k,i)) > 1.0e30_RKIND)) then
-
-   if (p3dbg_bad_input_n < P3DBG_MAX_BAD_INPUT) then
-      ios = 0
-      write(dbgmsg,'(A,3I10)',iostat=ios) 'P3DBG_BAD_EXNER_ARG (j,i,k)=', j,i,k
-      if (ios == 0) call mpas_log_write(trim(dbgmsg))
-      write(dbgmsg,'(A,1X,ES12.4,1X,ES12.4,1X,ES12.4)',iostat=ios) &
-           '  arg_exner zz rtheta=', arg_exner, zz(k,i), (rtheta_p(k,i)+rtheta_b(k,i))
-      if (ios == 0) call mpas_log_write(trim(dbgmsg))
-      write(dbgmsg,'(A,1X,ES12.4,1X,ES12.4,1X,ES12.4)',iostat=ios) '  exner_b th qv=', exner_b(k,i), th_p(i,k,j), qv_p(i,k,j)
-      if (ios == 0) call mpas_log_write(trim(dbgmsg))
-      if (ios /= 0) call mpas_log_write('P3DBG_BAD_EXNER_ARG: internal write failed (iostat>0)')
-      
-      write(dbgmsg,'(A,1X,ES12.4,1X,ES12.4,1X,ES12.4,1X,ES12.4)',iostat=ios) &
-           '  rho_zz theta_m rth_b rth_p=', rho_zz(k,i), theta_m(k,i), rtheta_b(k,i), rtheta_p(k,i)
-      if (ios == 0) call mpas_log_write(trim(dbgmsg))
-      write(dbgmsg,'(A,1X,ES12.4,1X,ES12.4,1X,ES12.4,1X,ES12.4,1X,ES12.4)',iostat=ios) &
-           '  p_base p_pert p_total exner exner_b=', pressure_b(k,i), pressure_p(k,i), &
-     pressure_b(k,i)+pressure_p(k,i), exner(k,i), exner_b(k,i)
-      if (ios == 0) call mpas_log_write(trim(dbgmsg))
-      write(dbgmsg,'(A,1X,ES12.4,1X,ES12.4,1X,ES12.4,1X,ES12.4)',iostat=ios) &
-           '  th qv qc qr=', th_p(i,k,j), qv_p(i,k,j), qc_p(i,k,j), qr_p(i,k,j)
-      if (ios == 0) call mpas_log_write(trim(dbgmsg))
-
-      if (trim(mp_scheme) == 'mp_p3' .and. (associated(p3_debug_on) .and. p3_debug_on)) then
-         write(dbgmsg,'(A,3I10)',iostat=ios) 'P3DBG_ABORT_ON_BAD_EXNER (j,i,k)=', j,i,k
-         if (ios == 0) call mpas_log_write(trim(dbgmsg))
-         call physics_error_fatal('P3DBG_ABORT_ON_BAD_EXNER (see prior logs)')
-      end if
-      p3dbg_bad_input_n = p3dbg_bad_input_n + 1
-      if (p3dbg_bad_input_n == P3DBG_MAX_BAD_INPUT) then
-         call mpas_log_write('P3DBG_BAD_EXNER_ARG: further messages suppressed on this rank')
-         p3dbg_bad_input_n = p3dbg_bad_input_n + 1
-      end if
-   end if
-
-   ! hard reset to base to prevent NaN propagation
-   rtheta_p(k,i)  = 0.0_RKIND
-   exner(k,i)     = exner_b(k,i)
-   pressure_p(k,i)= 0.0_RKIND
-
-else
-   exner(k,i) = arg_exner**rcv
-
-   !pertubation pressure:
-   pressure_p(k,i) = zz(k,i)*R_d*(exner(k,i)*rtheta_p(k,i) &
-                   + (exner(k,i)-exner_b(k,i))*rtheta_b(k,i))
-end if
-
-    else
-       !exner function:
-       exner(k,i) = (zz(k,i)*(R_d/P0)*(rtheta_p(k,i)+rtheta_b(k,i)))**rcv
-
-       !pertubation pressure:
-       pressure_p(k,i) = zz(k,i)*R_d*(exner(k,i)*rtheta_p(k,i) &
-                       + (exner(k,i)-exner_b(k,i))*rtheta_b(k,i))
-    end if
+    !pertubation pressure:
+    pressure_p(k,i) = zz(k,i)*R_d*(exner(k,i)*rtheta_p(k,i) &
+                    + (exner(k,i)-exner_b(k,i))*rtheta_b(k,i))
 
  enddo
  enddo

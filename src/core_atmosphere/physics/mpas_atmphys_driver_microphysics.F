@@ -11,7 +11,6 @@
  use mpas_pool_routines
  use mpas_timer, only : mpas_timer_start, mpas_timer_stop
  use mpas_dmpar, only : IO_NODE
- use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 
  use mpas_atmphys_constants
  use mpas_atmphys_init_microphysics
@@ -595,8 +594,6 @@ if (len_trim(p3_lookup_file_dir) == 0) then
  integer:: errflg
 
 
- integer :: p3_badcount
- character(len=StrKIND) :: p3_dbgmsg
  real(kind=RKIND) :: pratio
 
 
@@ -604,9 +601,6 @@ if (len_trim(p3_lookup_file_dir) == 0) then
   ! P3 debug throttling (to prevent multi-GB logs)
   logical, save :: p3dbg_drv_banner_printed = .false.
   logical, save :: p3dbg_drv_diag_printed   = .false.
-  integer, parameter :: P3DBG_MAX_BAD_PI = 10
-  integer, save :: p3dbg_bad_pi_n = 0
-  logical, save :: p3dbg_supp_bad_pi_msg = .false.
   logical, pointer :: p3_debug_on_ptr
   logical, save :: p3dbg_alloc_banner_done = .false.
  integer, pointer :: idx_qit, idx_qni, idx_qir, idx_qib, idx_qzi, idx_qli
@@ -622,7 +616,6 @@ if (len_trim(p3_lookup_file_dir) == 0) then
   logical :: rolling_old
 ! --- P3 column buffers (packed 1D/2D) ---
  real(kind=RKIND), allocatable :: th1d(:), qv1d(:), qc1d(:), qr1d(:), nr1d(:)
-real(kind=RKIND), allocatable :: qv_in(:), qc_in(:), qr_in(:), qi_in(:), qs_in(:), qg_in(:)
  real(kind=RKIND), allocatable :: p1d(:),  w1d(:),  dz1d(:)
 ! --- P3 sub-grid vertical velocity for droplet activation (from the PBL scheme) ---
  character(len=StrKIND), pointer :: pbl_scheme_mp
@@ -660,8 +653,6 @@ real(kind=RKIND) :: aerosol_source_w, aerosol_source_i
 
 
 
- p3_badcount = 0
- p3_badcount = 0
  nullify(p3_debug_on_ptr)
  call mpas_pool_get_config(configs,'config_microp_scheme',microp_scheme)
  call mpas_pool_get_config(configs,'config_p3_debug_on',p3_debug_on_ptr)
@@ -859,7 +850,6 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
         end if
        ! Column buffers
        allocate(th1d(kts:kte), qv1d(kts:kte), qc1d(kts:kte), qr1d(kts:kte), nr1d(kts:kte))
-       allocate(qv_in(kts:kte), qc_in(kts:kte), qr_in(kts:kte), qi_in(kts:kte), qs_in(kts:kte), qg_in(kts:kte))
        allocate(pi1d(kts:kte), t1d(kts:kte))
        allocate(qi1d(kts:kte), ni1d(kts:kte), qs1d(kts:kte), qg1d(kts:kte))
        allocate(thold1d(kts:kte), qvold1d(kts:kte))    ! <<< NEW: "old" state buffers
@@ -928,7 +918,6 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                 else
                    w1d(k) = 0.5_RKIND*w_p(i,k,j)
                 endif
-                if (.not. ieee_is_finite(w1d(k))) w1d(k) = 0.0_RKIND
                 dz1d(k) = dz_p(i,k,j)
 
                 select case (sigw_opt)
@@ -949,60 +938,19 @@ call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI_ptr)
                 case default
                    sigw1d(k) = 0._RKIND
                 end select
-                if (.not. ieee_is_finite(sigw1d(k))) sigw1d(k) = 0.0_RKIND
-                sigw1d(k) = max(0._RKIND, sigw1d(k))
+                if (sigw1d(k) < 0._RKIND) sigw1d(k) = 0._RKIND
                 sigw_p3(k,i) = sigw1d(k)
 
                 pi1d(k) = pi_p(i,k,j)
                 ! Temperature (K) from theta * Exner
                 t1d(k)  = th1d(k) * pi1d(k)
 
-                !--------------------------------------------------------------------------------
-                ! Sanitize any non-finite/negative category fields to prevent NaN propagation.
-                ! (There is no bulk qi/ni with P3: qi_p and ni_p are the sums over the categories,
-                ! so the former per-call seeding of category 1 from qi_p/ni_p has been removed.)
-                !--------------------------------------------------------------------------------
-                block
-                   real(kind=RKIND) :: vtmp
-                   integer :: cc
-                   do cc = 1, nCat_layout_drv
-                      vtmp = scalars(idx_qit + (cc-1), k, i)
-                      if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
-                      scalars(idx_qit + (cc-1), k, i) = vtmp
-
-                      vtmp = scalars(idx_qni + (cc-1), k, i)
-                      if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
-                      scalars(idx_qni + (cc-1), k, i) = vtmp
-
-                      vtmp = scalars(idx_qir + (cc-1), k, i)
-                      if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
-                      scalars(idx_qir + (cc-1), k, i) = vtmp
-
-                      vtmp = scalars(idx_qib + (cc-1), k, i)
-                      if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
-                      scalars(idx_qib + (cc-1), k, i) = vtmp
-
-                      ! p3_qzi*/p3_qli* exist only when the option is on (packages mp_p3_3mom*/mp_p3_lf*)
-                      if (p3_trplMomI) then
-                         vtmp = scalars(idx_qzi + (cc-1), k, i)
-                         if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
-                         scalars(idx_qzi + (cc-1), k, i) = vtmp
-                      end if
-
-                      if (p3_liqfrac) then
-                         vtmp = scalars(idx_qli + (cc-1), k, i)
-                         if (.not. ieee_is_finite(vtmp) .or. vtmp < 0._RKIND) vtmp = 0._RKIND
-                         scalars(idx_qli + (cc-1), k, i) = vtmp
-                      end if
-                   end do
-                end block
-
                 ! Default: single-category ice for MPAS wrapper
                                 qi1d(k) = 0.0_RKIND
                 ni1d(k) = 0.0_RKIND
                 do c = 1, p3_nCat
-                   qi1d(k) = qi1d(k) + max(scalars(idx_qit + (c-1), k, i), 0.0_RKIND)
-                   ni1d(k) = ni1d(k) + max(scalars(idx_qni + (c-1), k, i), 0.0_RKIND)
+                   qi1d(k) = qi1d(k) + scalars(idx_qit + (c-1), k, i)
+                   ni1d(k) = ni1d(k) + scalars(idx_qni + (c-1), k, i)
                 end do
                 qs1d(k) = 0.0_RKIND
                 qg1d(k) = 0.0_RKIND
@@ -1064,85 +1012,6 @@ vmi1d(k,c)   = 0.0_RKIND
                 rainprod1d    = 0.0_RKIND
                 evapprod1d    = 0.0_RKIND
 
-                !--------------------------------------------------------------------------------
-                ! P3 safety: enforce finite / nonnegative inputs before calling P3.
-                ! This prevents uninitialized / negative category fields from triggering SIGFPE
-                ! (e.g., pow() invalid) inside P3 or downstream dynamics.
-                !--------------------------------------------------------------------------------
-                do k = kts, kte
-                   if (.not. ieee_is_finite(qv1d(k))) qv1d(k) = qv_in(k)
-                   if (.not. ieee_is_finite(qv1d(k))) qv1d(k) = 0._RKIND
-                   if (qv1d(k) < 0._RKIND) qv1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qc1d(k))) qc1d(k) = qc_in(k)
-                   if (.not. ieee_is_finite(qc1d(k))) qc1d(k) = 0._RKIND
-                   if (qc1d(k) < 0._RKIND) qc1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qr1d(k))) qr1d(k) = qr_in(k)
-                   if (.not. ieee_is_finite(qr1d(k))) qr1d(k) = 0._RKIND
-                   if (qr1d(k) < 0._RKIND) qr1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qi1d(k))) qi1d(k) = qi_in(k)
-                   if (.not. ieee_is_finite(qi1d(k))) qi1d(k) = 0._RKIND
-                   if (qi1d(k) < 0._RKIND) qi1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qs1d(k))) qs1d(k) = qs_in(k)
-                   if (.not. ieee_is_finite(qs1d(k))) qs1d(k) = 0._RKIND
-                   if (qs1d(k) < 0._RKIND) qs1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qg1d(k))) qg1d(k) = qg_in(k)
-                   if (.not. ieee_is_finite(qg1d(k))) qg1d(k) = 0._RKIND
-                   if (qg1d(k) < 0._RKIND) qg1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(nc1d(k))) nc1d(k) = 0._RKIND
-                   if (nc1d(k) < 0._RKIND) nc1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(nr1d(k))) nr1d(k) = 0._RKIND
-                   if (nr1d(k) < 0._RKIND) nr1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(ni1d(k))) ni1d(k) = 0._RKIND
-                   if (ni1d(k) < 0._RKIND) ni1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(nwfa1d(k))) then
-                      nwfa1d(k) = 0._RKIND
-                   end if
-                   if (nwfa1d(k) < 0._RKIND) then
-                      nwfa1d(k) = 0._RKIND
-                   end if
-                   if (.not. ieee_is_finite(nifa1d(k))) then
-                      nifa1d(k) = 0._RKIND
-                   end if
-                   if (nifa1d(k) < 0._RKIND) then
-                      nifa1d(k) = 0._RKIND
-                   end if
-                   if (.not. ieee_is_finite(p1d(k))) p1d(k) = 1._RKIND
-                   if (p1d(k) < 1._RKIND) p1d(k) = 1._RKIND
-                   if (.not. ieee_is_finite(dz1d(k))) dz1d(k) = 1._RKIND
-                   if (dz1d(k) <= 0._RKIND) dz1d(k) = 1._RKIND
-                   if (.not. ieee_is_finite(t1d(k))) t1d(k) = 300._RKIND
-                   if (t1d(k) < 100._RKIND) t1d(k) = 100._RKIND
-                    if (t1d(k) > 450._RKIND) t1d(k) = 450._RKIND
-                   do c = 1, p3_nCat
-                      if (.not. ieee_is_finite(qit1d(k,c))) qit1d(k,c) = 0._RKIND
-                      if (qit1d(k,c) < 0._RKIND) qit1d(k,c) = 0._RKIND
-                      if (.not. ieee_is_finite(qni1d(k,c))) qni1d(k,c) = 0._RKIND
-                      if (qni1d(k,c) < 0._RKIND) qni1d(k,c) = 0._RKIND
-                      if (.not. ieee_is_finite(qir1d(k,c))) qir1d(k,c) = 0._RKIND
-                      if (qir1d(k,c) < 0._RKIND) qir1d(k,c) = 0._RKIND
-                      if (.not. ieee_is_finite(qib1d(k,c))) qib1d(k,c) = 0._RKIND
-                      if (qib1d(k,c) < 0._RKIND) qib1d(k,c) = 0._RKIND
-                       if (allocated(qzi1d)) then
-                         if (.not. ieee_is_finite(qzi1d(k,c))) qzi1d(k,c) = 0._RKIND
-                         if (qzi1d(k,c) < 0._RKIND) qzi1d(k,c) = 0._RKIND
-                      end if
-                      if (allocated(qli1d)) then
-                         if (.not. ieee_is_finite(qli1d(k,c))) qli1d(k,c) = 0._RKIND
-                         if (qli1d(k,c) < 0._RKIND) qli1d(k,c) = 0._RKIND
-                      end if
-                   end do
-                end do
-                 ! (memfix/physfix) Removed misplaced pre-call T->theta conversion block.
-        ! Snapshot inputs for NaN recovery (MPAS-compatible: do not zero the column on non-finite returns)
-        do k = kts, kte
-           qv_in(k) = qv1d(k)
-           qc_in(k) = qc1d(k)
-           qr_in(k) = qr1d(k)
-           qi_in(k) = qi1d(k)
-           qs_in(k) = qs1d(k)
-           qg_in(k) = qg1d(k)
-        end do
-
                 ii_loc = i
                 jj_loc = j
 
@@ -1166,71 +1035,9 @@ vmi1d(k,c)   = 0.0_RKIND
                     ! Match the existing Thompson/MPAS contract: when microphysics is
                     ! subcycled, rainprod and evapprod contain the final substep's
                     ! post-limiter instantaneous rates.
-                    if (.not. ieee_is_finite(rainprod1d(k)) .or. rainprod1d(k) < 0._RKIND) then
-                       rainprod1d(k) = 0._RKIND
-                    endif
-                    if (.not. ieee_is_finite(evapprod1d(k)) .or. evapprod1d(k) < 0._RKIND) then
-                       evapprod1d(k) = 0._RKIND
-                    endif
                     rainprod_p(i,k,j) = rainprod1d(k)
                     evapprod_p(i,k,j) = evapprod1d(k)
                  end do
-                !--------------------------------------------------------------------------------
-                ! P3 safety: sanitize outputs (finite / nonnegative) before using them further.
-                !--------------------------------------------------------------------------------
-                do k = kts, kte
-                   if (.not. ieee_is_finite(qv1d(k))) qv1d(k) = 0._RKIND
-                   if (qv1d(k) < 0._RKIND) qv1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qc1d(k))) qc1d(k) = 0._RKIND
-                   if (qc1d(k) < 0._RKIND) qc1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qr1d(k))) qr1d(k) = 0._RKIND
-                   if (qr1d(k) < 0._RKIND) qr1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qi1d(k))) qi1d(k) = 0._RKIND
-                   if (qi1d(k) < 0._RKIND) qi1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qs1d(k))) qs1d(k) = 0._RKIND
-                   if (qs1d(k) < 0._RKIND) qs1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(qg1d(k))) qg1d(k) = 0._RKIND
-                   if (qg1d(k) < 0._RKIND) qg1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(nc1d(k))) nc1d(k) = 0._RKIND
-                   if (nc1d(k) < 0._RKIND) nc1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(nr1d(k))) nr1d(k) = 0._RKIND
-                   if (nr1d(k) < 0._RKIND) nr1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(ni1d(k))) ni1d(k) = 0._RKIND
-                   if (ni1d(k) < 0._RKIND) ni1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(nwfa1d(k))) nwfa1d(k) = 0._RKIND
-                   if (nwfa1d(k) < 0._RKIND) nwfa1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(nifa1d(k))) nifa1d(k) = 0._RKIND
-                   if (nifa1d(k) < 0._RKIND) nifa1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(zdbz1d(k))) zdbz1d(k) = -999._RKIND
-                   if (.not. ieee_is_finite(effc1d(k))) effc1d(k) = 0._RKIND
-                   if (effc1d(k) < 0._RKIND) effc1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(effiave1d(k))) effiave1d(k) = 0._RKIND
-                   if (effiave1d(k) < 0._RKIND) effiave1d(k) = 0._RKIND
-                   if (.not. ieee_is_finite(pi1d(k))) pi1d(k) = 1._RKIND
-                   if (pi1d(k) < 1.0e-6_RKIND) pi1d(k) = 1.0e-6_RKIND
-                   if (.not. ieee_is_finite(t1d(k))) t1d(k) = 300._RKIND
-                   if (t1d(k) < 100._RKIND) t1d(k) = 100._RKIND
-                    if (t1d(k) > 450._RKIND) t1d(k) = 450._RKIND
-                   do c = 1, p3_nCat
-                      if (.not. ieee_is_finite(qit1d(k,c))) qit1d(k,c) = 0._RKIND
-                      if (qit1d(k,c) < 0._RKIND) qit1d(k,c) = 0._RKIND
-                      if (.not. ieee_is_finite(qni1d(k,c))) qni1d(k,c) = 0._RKIND
-                      if (qni1d(k,c) < 0._RKIND) qni1d(k,c) = 0._RKIND
-                      if (.not. ieee_is_finite(qir1d(k,c))) qir1d(k,c) = 0._RKIND
-                      if (qir1d(k,c) < 0._RKIND) qir1d(k,c) = 0._RKIND
-                      if (.not. ieee_is_finite(qib1d(k,c))) qib1d(k,c) = 0._RKIND
-                      if (qib1d(k,c) < 0._RKIND) qib1d(k,c) = 0._RKIND
-                       if (allocated(qzi1d)) then
-                         if (.not. ieee_is_finite(qzi1d(k,c))) qzi1d(k,c) = 0._RKIND
-                         if (qzi1d(k,c) < 0._RKIND) qzi1d(k,c) = 0._RKIND
-                      end if
-                      if (allocated(qli1d)) then
-                         if (.not. ieee_is_finite(qli1d(k,c))) qli1d(k,c) = 0._RKIND
-                         if (qli1d(k,c) < 0._RKIND) qli1d(k,c) = 0._RKIND
-                      end if
-                   end do
-                end do
-
                 ! MPAS bulk-compatible aerosol-aware source update:
                 ! apply the diagnosed lowest-level aerosol source tendency after each P3 call.
                 ! This mirrors MPAS Thompson aerosol-aware behavior and closes a missing part of
@@ -1239,22 +1046,15 @@ vmi1d(k,c)   = 0.0_RKIND
                 aerosol_source_i = 0._RKIND
                 if (allocated(nwfa2d_p)) aerosol_source_w = nwfa2d_p(i,j)
                 if (allocated(nifa2d_p)) aerosol_source_i = nifa2d_p(i,j)
-                if (.not. ieee_is_finite(aerosol_source_w)) aerosol_source_w = 0._RKIND
-                if (.not. ieee_is_finite(aerosol_source_i)) aerosol_source_i = 0._RKIND
                 if (p3_aerosols_ptr .and. kts <= kte) then
-                   nwfa1d(kts) = max(0._RKIND, nwfa1d(kts) + aerosol_source_w * dt_microp)
-                   nifa1d(kts) = max(0._RKIND, nifa1d(kts) + aerosol_source_i * dt_microp)
+                   nwfa1d(kts) = nwfa1d(kts) + aerosol_source_w * dt_microp
+                   nifa1d(kts) = nifa1d(kts) + aerosol_source_i * dt_microp
                    if (i == its .and. j == jts .and. associated(p3_debug_on_ptr) .and. p3_debug_on_ptr) then
                       write(errmsg,'(A,4ES12.4)') 'P3DBG_AER_SRC: nwfa2d,nifa2d,nwfa(kts),nifa(kts)=', &
                            aerosol_source_w, aerosol_source_i, nwfa1d(kts), nifa1d(kts)
                       call mpas_log_write(trim(errmsg))
                    end if
                 end if
-
-                if (.not. ieee_is_finite(rain_step_mm)  .or. rain_step_mm  < 0._RKIND) rain_step_mm  = 0._RKIND
-                if (.not. ieee_is_finite(snow_step_mm)  .or. snow_step_mm  < 0._RKIND) snow_step_mm  = 0._RKIND
-                if (.not. ieee_is_finite(graup_step_mm) .or. graup_step_mm < 0._RKIND) graup_step_mm = 0._RKIND
-                if (.not. ieee_is_finite(ice_step_mm)   .or. ice_step_mm   < 0._RKIND) ice_step_mm   = 0._RKIND
 
                 ! --- Diagnose snow ratio (sr_step) for MPAS outputs ---
                 ! WRF P3 defines total surface precipitation as (liquid + solid) and
@@ -1271,27 +1071,9 @@ vmi1d(k,c)   = 0.0_RKIND
                 end block
 
                 ! Convert updated temperature back to theta (Exner assumed unchanged within dt_microp)
-                 do k = kts, kte
-                    if (.not. ieee_is_finite(pi1d(k)) .or. pi1d(k) <= 0._RKIND) then
-                       if (p3_badcount < 10 .and. p3dbg_bad_pi_n < P3DBG_MAX_BAD_PI) then
-                          write(p3_dbgmsg,'(A,3I10,1X,ES12.4,1X,ES12.4)') &
-                               'P3DBG_BAD_PI1D_POST (j,i,k,pi,p)=', j,i,k, pi1d(k), p1d(k)
-                          call mpas_log_write(trim(p3_dbgmsg))
-                          p3_badcount = p3_badcount + 1
-                          p3dbg_bad_pi_n = p3dbg_bad_pi_n + 1
-                          if (p3dbg_bad_pi_n == P3DBG_MAX_BAD_PI .and. .not. p3dbg_supp_bad_pi_msg) then
-                             call mpas_log_write('P3DBG_BAD_PI1D_POST: further occurrences suppressed')
-                             p3dbg_supp_bad_pi_msg = .true.
-                          end if
-                       end if
-                       if (ieee_is_finite(p1d(k)) .and. p1d(k) > 1._RKIND) then
-                          pi1d(k) = (p1d(k)/P0)**rcp
-                       else
-                          pi1d(k) = 1._RKIND
-                       end if
-                    end if
-                    th1d(k) = t1d(k) / max(1.0e-12_RKIND, pi1d(k))
-                 end do
+                do k = kts, kte
+                   th1d(k) = t1d(k) / pi1d(k)
+                end do
 
 
                 ! --- Surface precipitation bookkeeping (mm) ---
@@ -1326,13 +1108,9 @@ vmi1d(k,c)   = 0.0_RKIND
                 qs1d(k) = 0.0_RKIND
                 qg1d(k) = 0.0_RKIND
                 do c = 1, p3_nCat
-                   if (.not. ieee_is_finite(qit1d(k,c)) .or. qit1d(k,c) < 0._RKIND) qit1d(k,c) = 0._RKIND
-                   if (.not. ieee_is_finite(qni1d(k,c)) .or. qni1d(k,c) < 0._RKIND) qni1d(k,c) = 0._RKIND
                    qi1d(k) = qi1d(k) + qit1d(k,c)
                    ni1d(k) = ni1d(k) + qni1d(k,c)
                 end do
-                if (.not. ieee_is_finite(qi1d(k)) .or. qi1d(k) < 0._RKIND) qi1d(k) = 0._RKIND
-                if (.not. ieee_is_finite(ni1d(k)) .or. ni1d(k) < 0._RKIND) ni1d(k) = 0._RKIND
              end do
 
              ! Unpack final column back to driver arrays ONCE
@@ -1340,9 +1118,7 @@ vmi1d(k,c)   = 0.0_RKIND
              do k = kts, kte
                 ! Convert P3-updated temperature (t1d) back to dry potential temperature (theta)
                 ! so MPAS state (theta_m/exner/pressure) remains thermodynamically consistent.
-                if ((p1d(k) /= p1d(k)) .or. (p1d(k) <= 1._RKIND) .or. (abs(p1d(k)) > 1.0e9_RKIND)) p1d(k) = P0
-                 ! (physfix) keep pi1d from dynamics; do not recompute from p1d here
-                if ((pi1d(k) /= pi1d(k)) .or. (pi1d(k) < 1.0e-6_RKIND)) pi1d(k) = 1.0e-6_RKIND
+                ! (physfix) keep pi1d from dynamics; do not recompute from p1d here
                 th1d(k) = t1d(k) / pi1d(k)
 
                 th_p(i,k,j)   = th1d(k)
@@ -1393,7 +1169,6 @@ vmi1d(k,c)   = 0.0_RKIND
        end do
 
        deallocate(th1d, qv1d, qc1d, qr1d, nr1d)
-       deallocate(qv_in, qc_in, qr_in, qi_in, qs_in, qg_in)
        deallocate(pi1d, t1d, qi1d, ni1d, qs1d, qg1d)
        deallocate(thold1d, qvold1d)  ! <<< NEW
        deallocate(p1d, w1d, sigw1d, dz1d, nc1d, nwfa1d, nifa1d, rainprod1d, evapprod1d, &
