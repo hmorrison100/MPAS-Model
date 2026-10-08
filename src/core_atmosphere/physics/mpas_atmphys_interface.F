@@ -399,9 +399,6 @@
  qv => scalars(index_qv,:,:)
  qc => scalars(index_qc,:,:)
  qr => scalars(index_qr,:,:)
- qi => scalars(index_qi,:,:)
- qs => scalars(index_qs,:,:)
- qg => scalars(index_qg,:,:)
  if(trim(microp_scheme) == 'mp_p3') then
     !qi, qs and qg are not allocated with mp_p3 (or are zero, with config_p3_ic_bulk_ice): qi_p is the sum
     !over the P3 ice categories of the total ice mass, and qs_p and qg_p are zero. The P3 scalars mixed by the PBL are copied to p3mix_p.
@@ -410,6 +407,10 @@
     qs => p3_zero_qsqg
     qg => p3_zero_qsqg
     call p3pbl_from_MPAS(configs,state,scalars,its,ite)
+ else
+    qi => scalars(index_qi,:,:)
+    qs => scalars(index_qs,:,:)
+    qg => scalars(index_qg,:,:)
  endif
 
  call mpas_pool_get_array(diag_physics,'plrad',plrad)
