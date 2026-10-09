@@ -539,6 +539,12 @@ if (len_trim(p3_lookup_file_dir) == 0) then
        call mpas_log_write('--- P3 warm-rain autoconversion/accretion option (autoAccr_param) = $i', &
                            intArgs=(/p3_autoAccr_loc/))
 
+       ! Predicted aerosols require double-moment cloud (P3 otherwise writes a warning to stdout
+       ! at every grid point and time step):
+       if (p3_aerosols .and. .not. p3_predictNc) then
+          call physics_error_fatal('config_p3_aerosols = true requires config_p3_predictNc = true')
+       end if
+
                call p3_init_for_mpas(dminfo, trim(p3_lookup_file_dir), p3_nCat, p3_trplMomI, p3_liqfrac, &
                      stat=p3_stat, abort_on_err=p3_abort_on_err, model='WRF', dowr=p3_dowr,    &
                      autoAccr_param_in=p3_autoAccr_loc, &

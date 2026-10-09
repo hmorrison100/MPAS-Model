@@ -40,7 +40,7 @@
 #endif
 #if defined(mpas)
  use mpas_log,           only: mpas_log_write
- use mpas_derived_types, only: MPAS_LOG_CRIT, dm_info
+ use mpas_derived_types, only: MPAS_LOG_ERR, MPAS_LOG_CRIT, dm_info
  use mpas_io_units,      only: mpas_new_unit, mpas_release_unit
  use mpas_dmpar,         only: mpas_dmpar_bcast_int, mpas_dmpar_bcast_reals
 #endif
@@ -542,12 +542,28 @@
   if(owr) print*
   if(owr) print*, ' P3 microphysics: v',trim(version_p3)
   if(owr) print*, '   P3_INIT (reading/creating lookup tables)'
+#if defined(mpas)
+  call mpas_log_write('P3_INIT: P3 microphysics v'//trim(version_p3))
+#endif
 
   TRIPLE_MOMENT_ICE: if (.not. trplMomI) then
 
+#if defined(mpas)
+    call mpas_log_write('P3_INIT: reading lookupTable_1 ['//trim(version_intended_table_1_2mom)//']: '// &
+                        trim(lookup_file_1))
+#else
     print*, '     Reading table 1 [',trim(version_intended_table_1_2mom),'] ...'
+#endif
 
+#if defined(mpas)
+    open(unit=lut_unit, file=lookup_file_1, status='old', action='read', iostat=ierr)
+    if (ierr /= 0) then
+       call mpas_log_write('P3_INIT: cannot open lookupTable_1 (2-moment ice): '//trim(lookup_file_1), &
+                           messageType=MPAS_LOG_CRIT)
+    endif
+#else
     open(unit=lut_unit, file=lookup_file_1, status='old', action='read')
+#endif
 
     !-- check that table version is correct:
     !   note:  to override and use a different lookup table, simply comment out the 'return' below
@@ -563,11 +579,12 @@
        if(owr) print*
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
-          print*,'Stopping in P3 init'
 #if defined(mpas)
-          call mpas_log_write('P3_INIT: lookupTable_1 (2-moment ice) version does not match P3', &
+          call mpas_log_write('P3_INIT: lookupTable_1 (2-moment ice) version '//trim(version_header_table_1_2mom)// &
+                              ' does not match P3 (expects '//trim(version_intended_table_1_2mom)//')', &
                               messageType=MPAS_LOG_CRIT)
 #else
+          print*,'Stopping in P3 init'
           stop
 #endif
        endif
@@ -610,12 +627,12 @@
 
     if (global_status == STATUS_ERROR) then
        if (err_abort) then
-          print*,'Stopping in P3 init'
-          flush(6)
 #if defined(mpas)
           call mpas_log_write('P3_INIT: error reading lookupTable_1 (2-moment ice)', &
                               messageType=MPAS_LOG_CRIT)
 #else
+          print*,'Stopping in P3 init'
+          flush(6)
           stop
 #endif
        endif
@@ -624,7 +641,12 @@
 
   else ! TRIPLE_MOMENT_ICE  (the following is for trplMomI=.true.)
 
+#if defined(mpas)
+    call mpas_log_write('P3_INIT: reading lookupTable_1 [v'//trim(version_intended_table_1_3mom)//']: '// &
+                        trim(lookup_file_1))
+#else
     print*, '     Reading table 1 [v',trim(version_intended_table_1_3mom),'] ...'
+#endif
 
     open(unit=lut_unit,file=lookup_file_1,status='old',iostat=ierr,err=101)
  101  if (ierr.ne.0) then
@@ -654,11 +676,12 @@
        if(owr) print*
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
-          print*,'Stopping in P3 init'
 #if defined(mpas)
-          call mpas_log_write('P3_INIT: lookupTable_1 (3-moment ice) version does not match P3', &
+          call mpas_log_write('P3_INIT: lookupTable_1 (3-moment ice) version '//trim(version_header_table_1_3mom)// &
+                              ' does not match P3 (expects '//trim(version_intended_table_1_3mom)//')', &
                               messageType=MPAS_LOG_CRIT)
 #else
+          print*,'Stopping in P3 init'
           stop
 #endif
        endif
@@ -700,7 +723,12 @@
 
     close(lut_unit)
 
+#if defined(mpas)
+    call mpas_log_write('P3_INIT: reading lookupTable_3 [v'//trim(version_intended_table_3)//']: '// &
+                        trim(lookup_file_3))
+#else
     print*, '     Reading table 3 [v',trim(version_intended_table_3),'] ...'
+#endif
 
     open(unit=lut_unit,file=lookup_file_3,status='old',iostat=ierr,err=102)
  102  if (ierr.ne.0) then
@@ -730,10 +758,12 @@
        if(owr) print*
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
-          print*,'Stopping in P3 init'
 #if defined(mpas)
-          call mpas_log_write('P3_INIT: lookupTable_3 version does not match P3', messageType=MPAS_LOG_CRIT)
+          call mpas_log_write('P3_INIT: lookupTable_3 version '//trim(version_header_table_3)// &
+                              ' does not match P3 (expects '//trim(version_intended_table_3)//')', &
+                              messageType=MPAS_LOG_CRIT)
 #else
+          print*,'Stopping in P3 init'
           stop
 #endif
        endif
@@ -762,7 +792,19 @@
    ! read in ice-ice collision lookup table  (used for multicategory only)
 
        if(owr) print*, '     Reading table 2 [v',trim(version_intended_table_2),'] ...'
+#if defined(mpas)
+       call mpas_log_write('P3_INIT: reading lookupTable_2 [v'//trim(version_intended_table_2)//']: '// &
+                           trim(lookup_file_2))
+#endif
+#if defined(mpas)
+       open(unit=lut_unit,file=lookup_file_2,status='old',iostat=ierr)
+       if (ierr /= 0) then
+          call mpas_log_write('P3_INIT: cannot open lookupTable_2 (ice-ice collection, nCat > 1): '//trim(lookup_file_2), &
+                              messageType=MPAS_LOG_CRIT)
+       endif
+#else
        open(unit=lut_unit,file=lookup_file_2,status='old')
+#endif
 
        !--check that table version is correct:
        read(lut_unit,*) dumstr,version_header_table_2
@@ -777,11 +819,12 @@
           if(owr) print*
           global_status = STATUS_ERROR
           if (trim(model)=='WRF' .or. trim(model) == 'CM1' .or. trim(model)=='KIN1D') then
-             print*,'Stopping in P3 init'
 #if defined(mpas)
-             call mpas_log_write('P3_INIT: lookupTable_2 (ice-ice collection, nCat > 1) version does not match P3', &
-                                 messageType=MPAS_LOG_CRIT)
+             call mpas_log_write('P3_INIT: lookupTable_2 (ice-ice collection, nCat > 1) version '//            &
+                                 trim(version_header_table_2)//' does not match P3 (expects '//                &
+                                 trim(version_intended_table_2)//')', messageType=MPAS_LOG_CRIT)
 #else
+             print*,'Stopping in P3 init'
              stop
 #endif
           endif
@@ -849,11 +892,11 @@
 
  if (global_status == STATUS_ERROR) then
     if (err_abort) then
-       print*,'Stopping in P3 init'
-       flush(6)
 #if defined(mpas)
        call mpas_log_write('P3_INIT: error in the lookup tables', messageType=MPAS_LOG_CRIT)
 #else
+       print*,'Stopping in P3 init'
+       flush(6)
        stop
 #endif
     endif
@@ -2544,6 +2587,9 @@ END subroutine p3_init
  logical :: log_nucleationPossible,log_hydrometeorsPresent,log_predictSsat,              &
             log_hmossopOn,log_outputStep,log_outputStep_cm1,log_tmp1,log_tmp2,          &
             log_noAerosols,log_badAerosols
+#if defined(mpas)
+ character(len=256) :: mpas_msg
+#endif
 
 ! quantities related to process rates/parameters, interpolated from lookup tables:
 
@@ -2761,6 +2807,20 @@ call cpu_time(timer_start(1))
     log_badAerosols = any(.not.(na_w >= 0. .and. na_w < 1.e+20)) .or.                     &
                       any(.not.(na_i >= 0. .and. na_i < 1.e+20))
     if (log_noAerosols .or. log_badAerosols) then
+#if defined(mpas)
+       if (log_noAerosols) then
+          write(mpas_msg,'(a,2es12.4)') 'P3_MAIN: config_p3_aerosols = true, but nwfa and/or nifa are zero '// &
+                'everywhere in the column; max(nwfa), max(nifa) =',maxval(na_w),maxval(na_i)
+       else
+          write(mpas_msg,'(4(a,i0))') 'P3_MAIN: config_p3_aerosols = true, but nwfa and/or nifa are NaN, '// &
+                'negative or >= 1e20 (possibly uninitialized); invalid values: nwfa ',                    &
+                count(.not.(na_w >= 0. .and. na_w < 1.e+20)),' of ',size(na_w),', nifa ',             &
+                count(.not.(na_i >= 0. .and. na_i < 1.e+20)),' of ',size(na_i)
+       endif
+       call mpas_log_write(trim(mpas_msg), messageType=MPAS_LOG_ERR)
+       call mpas_log_write('P3_MAIN: supply nwfa and nifa in the initial conditions (e.g. from the aerosol '// &
+                           'climatology), or set config_p3_aerosols = false', messageType=MPAS_LOG_ERR)
+#else
        print*
        if (log_noAerosols) then
           print*,'*** ERROR in P3_MAIN: p3_aerosols = .true., but the host model supplied no aerosols'
@@ -2773,13 +2833,14 @@ call cpu_time(timer_start(1))
        endif
        print*,'    Supply the aerosol number mixing ratios (e.g. from a climatology), or set p3_aerosols = .false.'
        print*
+#endif
        global_status = STATUS_ERROR
        if (trim(model) == 'WRF' .or. trim(model) == 'CM1' .or. trim(model) == 'KIN1D') then
-          print*,'Stopping in P3_MAIN'
 #if defined(mpas)
           call mpas_log_write('P3_MAIN: p3_aerosols = .true., but the aerosol number mixing ratios are zero or invalid', &
                               messageType=MPAS_LOG_CRIT)
 #else
+          print*,'Stopping in P3_MAIN'
           stop
 #endif
        endif
@@ -7090,7 +7151,11 @@ end function proc_from_LUT_3
 
  endif
 
+#if defined(mpas)
+ call mpas_log_write('P3 ICECAT_DESTINATION: no destination ice category found', messageType=MPAS_LOG_ERR)
+#else
  print*, 'ERROR in s/r icecat_destination -- made it to end'
+#endif
  global_status = STATUS_ERROR
  return
 
@@ -7987,6 +8052,9 @@ end function proc_from_LUT_3
  real, parameter  :: eps_m3 = 1.e-20
 
  real :: dum,c1,c2,c3,Q,R,aa,bb
+#if defined(mpas)
+ character(len=256) :: mpas_msg
+#endif
 
  if (mom3>eps_m3) then
 
@@ -8028,13 +8096,15 @@ end function proc_from_LUT_3
 
  else
 
+#if defined(mpas)
+    write(mpas_msg,'(a,3es14.6)') 'P3 COMPUTE_MU_3MOM_1: input moments out of bounds; mom0, mom3, mom6 =', &
+                                  mom0,mom3,mom6
+    call mpas_log_write(trim(mpas_msg), messageType=MPAS_LOG_CRIT)
+#else
     print*, 'Input parameters out of bounds in function COMPUTE_MU_3MOMENT'
     print*, 'mom0 = ',mom0
     print*, 'mom3 = ',mom3
     print*, 'mom6 = ',mom6
-#if defined(mpas)
-    call mpas_log_write('P3 COMPUTE_MU_3MOM_1: input moments out of bounds', messageType=MPAS_LOG_CRIT)
-#else
     stop
 #endif
 
