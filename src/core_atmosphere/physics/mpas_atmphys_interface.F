@@ -22,7 +22,6 @@
  use mpas_atmphys_constants
  use mpas_atmphys_vars
  use mpas_timer, only: mpas_timer_start, mpas_timer_stop
- use mpas_atmphys_utilities, only: physics_error_fatal
  use mpas_atmphys_p3_pblmix, only: allocate_p3pbl,deallocate_p3pbl,p3pbl_from_MPAS
 
  implicit none
@@ -118,9 +117,6 @@
 
  integer,pointer:: index_p3_qit,index_p3_qni,index_p3_qir
  integer:: c,i,k,nCat
-
- if(.not. allocated(p3_qi_sum) .or. .not. allocated(p3_ni_sum)) &
-    call physics_error_fatal('p3_sum_ice: P3 work fields not allocated (p3_allocate_work not called)')
 
  call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
  call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
@@ -863,7 +859,8 @@ end subroutine pre_microphysics
 
     case("mp_p3")
        !qi, qs, qg and ni are not allocated with mp_p3: qi and ni are the sums over the P3 ice categories of
-       !p3_qit and p3_qni, and qs and qg are zero (also used for the tendencies below):
+       !p3_qit and p3_qni, and qs and qg are zero, for the tendencies below (P3 does not use qi_p, qs_p, qg_p
+       !and ni_p):
        call p3_sum_ice(state,scalars,its,ite)
        qi => p3_qi_sum
        qs => p3_zero_qsqg
@@ -876,10 +873,6 @@ end subroutine pre_microphysics
        do j = jts,jte
        do k = kts,kte
        do i = its,ite
-          qi_p(i,k,j) = max(0._RKIND,qi(k,i))
-          qs_p(i,k,j) = max(0._RKIND,qs(k,i))
-          qg_p(i,k,j) = max(0._RKIND,qg(k,i))
-          ni_p(i,k,j) = max(0._RKIND,ni(k,i))
           nr_p(i,k,j) = max(0._RKIND,nr(k,i))
        enddo
        enddo
@@ -898,8 +891,6 @@ end subroutine pre_microphysics
 
        call mpas_pool_get_array(diag_physics,'nifa2d'  ,nifa2d  )
        call mpas_pool_get_array(diag_physics,'nwfa2d'  ,nwfa2d  )
-       call mpas_pool_get_array(diag_physics,'rainprod',rainprod)
-       call mpas_pool_get_array(diag_physics,'evapprod',evapprod)
        call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
        call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
        call mpas_pool_get_array(diag_physics,'re_snow' ,re_snow )
@@ -920,9 +911,6 @@ end subroutine pre_microphysics
           do k = kts,kte
           do i = its,ite
              nc_p(i,k,j)       = nc(k,i)
-             !rainprod and evapprod are set to the rates of the last P3 substep in driver_microphysics:
-             rainprod_p(i,k,j) = 0._RKIND
-             evapprod_p(i,k,j) = 0._RKIND
              recloud_p(i,k,j)  = re_cloud(k,i)
              reice_p(i,k,j)    = re_ice(k,i)
              resnow_p(i,k,j)   = re_snow(k,i)
@@ -1295,9 +1283,9 @@ end subroutine pre_microphysics
              nc(k,i)       = nc_p(i,k,j)
              rainprod(k,i) = rainprod_p(i,k,j)
              evapprod(k,i) = evapprod_p(i,k,j)
-             re_cloud(k,i) = max(0._RKIND,recloud_p(i,k,j))
-             re_ice(k,i)   = max(0._RKIND,reice_p(i,k,j))
-             re_snow(k,i)  = max(0._RKIND,resnow_p(i,k,j))
+             re_cloud(k,i) = recloud_p(i,k,j)
+             re_ice(k,i)   = reice_p(i,k,j)
+             re_snow(k,i)  = resnow_p(i,k,j)
           enddo
           enddo
        enddo

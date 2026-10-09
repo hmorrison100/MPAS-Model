@@ -208,11 +208,6 @@
 
  call mpas_pool_get_array(tend,'scalars_tend',tend_scalars)
 
-!mp_p3: scalars_tend must hold the same (P3) scalars as scalars (Registry.xml):
- if(trim(microp_scheme) == 'mp_p3' .and. size(tend_scalars,1) /= size(scalars,1)) &
-    call mpas_log_write('physics_get_tend: size(scalars_tend,1) = $i differs from size(scalars,1) = $i', &
-                        intArgs=(/size(tend_scalars,1),size(scalars,1)/), messageType=MPAS_LOG_CRIT)
-
 !initialize the tendency for the potential temperature and all scalars due to PBL, convection,
 !and longwave and shortwave radiation:
  allocate(tend_th(nVertLevels,nCellsSolve))
@@ -411,22 +406,18 @@
     enddo
     enddo
 
-    if(trim(microp_scheme) == 'mp_p3') then
-       !P3 has no bulk qi, qs and ni scalars: the PBL tendencies of the P3 scalars (rp3blten) are added
-       !in physics_get_tend (p3pbl_add_tend) instead of rqiblten, rqsblten and rniblten:
-       do i = 1, nCellsSolve
-       do k = 1, nVertLevels
-          tend_th(k,i) = tend_th(k,i) + rthblten(k,i)*mass(k,i)
-          tend_scalars(index_qv,k,i) = tend_scalars(index_qv,k,i) + rqvblten(k,i)*mass(k,i)
-          tend_scalars(index_qc,k,i) = tend_scalars(index_qc,k,i) + rqcblten(k,i)*mass(k,i)
-       enddo
-       enddo
-    else
     do i = 1, nCellsSolve
     do k = 1, nVertLevels
        tend_th(k,i) = tend_th(k,i) + rthblten(k,i)*mass(k,i)
        tend_scalars(index_qv,k,i) = tend_scalars(index_qv,k,i) + rqvblten(k,i)*mass(k,i)
        tend_scalars(index_qc,k,i) = tend_scalars(index_qc,k,i) + rqcblten(k,i)*mass(k,i)
+    enddo
+    enddo
+    !mp_p3 has no bulk qi, qs and ni scalars: the PBL tendencies of the P3 scalars are added in
+    !physics_get_tend (p3pbl_add_tend):
+    if(trim(microp_scheme) /= 'mp_p3') then
+    do i = 1, nCellsSolve
+    do k = 1, nVertLevels
        tend_scalars(index_qi,k,i) = tend_scalars(index_qi,k,i) + rqiblten(k,i)*mass(k,i)
     enddo
     enddo
@@ -475,22 +466,18 @@
 
 !add coupled tendencies due to convection:
  if(convection_scheme .ne. 'off') then
-    if(trim(microp_scheme) == 'mp_p3') then
-       !P3 has no bulk qi scalar: the convective ice tendency (rqicuten) is added to the P3 ice scalars
-       !in physics_get_tend (p3cu_add_tend), with the cloud water number tendency:
-       do i = 1, nCellsSolve
-       do k = 1, nVertLevels
-          tend_th(k,i) = tend_th(k,i) + rthcuten(k,i)*mass(k,i)
-          tend_scalars(index_qv,k,i) = tend_scalars(index_qv,k,i) + rqvcuten(k,i)*mass(k,i)
-          tend_scalars(index_qc,k,i) = tend_scalars(index_qc,k,i) + rqccuten(k,i)*mass(k,i)
-       enddo
-       enddo
-    else
     do i = 1, nCellsSolve
     do k = 1, nVertLevels
        tend_th(k,i) = tend_th(k,i) + rthcuten(k,i)*mass(k,i)
        tend_scalars(index_qv,k,i) = tend_scalars(index_qv,k,i) + rqvcuten(k,i)*mass(k,i)
        tend_scalars(index_qc,k,i) = tend_scalars(index_qc,k,i) + rqccuten(k,i)*mass(k,i)
+    enddo
+    enddo
+    !mp_p3 has no bulk qi and qs scalars: the convective ice and snow tendencies (rqicuten, rqscuten) are
+    !added to the P3 ice scalars in physics_get_tend (p3cu_add_tend):
+    if(trim(microp_scheme) /= 'mp_p3') then
+    do i = 1, nCellsSolve
+    do k = 1, nVertLevels
        tend_scalars(index_qi,k,i) = tend_scalars(index_qi,k,i) + rqicuten(k,i)*mass(k,i)
     enddo
     enddo
@@ -498,18 +485,14 @@
 
     cu_select: select case(trim(convection_scheme))
        case('cu_kain_fritsch')
-          if(trim(microp_scheme) == 'mp_p3') then
-             !P3 has no qs scalar: the Kain-Fritsch snow tendency (rqscuten) is added to the P3 ice scalars
-             !in physics_get_tend (p3cu_add_tend):
-             do i = 1, nCellsSolve
-             do k = 1, nVertLevels
-                tend_scalars(index_qr,k,i) = tend_scalars(index_qr,k,i) + rqrcuten(k,i)*mass(k,i)
-             enddo
-             enddo
-          else
           do i = 1, nCellsSolve
           do k = 1, nVertLevels
              tend_scalars(index_qr,k,i) = tend_scalars(index_qr,k,i) + rqrcuten(k,i)*mass(k,i)
+          enddo
+          enddo
+          if(trim(microp_scheme) /= 'mp_p3') then
+          do i = 1, nCellsSolve
+          do k = 1, nVertLevels
              tend_scalars(index_qs,k,i) = tend_scalars(index_qs,k,i) + rqscuten(k,i)*mass(k,i)
           enddo
           enddo

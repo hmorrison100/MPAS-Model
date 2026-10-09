@@ -191,14 +191,7 @@
 
        if(.not.allocated(rainprod_p)) allocate(rainprod_p(ims:ime,kms:kme,jms:jme))
        if(.not.allocated(evapprod_p)) allocate(evapprod_p(ims:ime,kms:kme,jms:jme))
-       rainprod_p = 0._RKIND
-       evapprod_p = 0._RKIND
-
-       if(.not.allocated(refl_p3_p)) allocate(refl_p3_p(ims:ime,kms:kme,jms:jme))
-       refl_p3_p = -35._RKIND
-
-       nr_p = 0._RKIND
-
+       if(.not.allocated(refl_p3_p) ) allocate(refl_p3_p(ims:ime,kms:kme,jms:jme) )
        if(.not.allocated(nc_p)) allocate(nc_p(ims:ime,kms:kme,jms:jme))
 
        !aerosol numbers and their surface source only with predicted aerosols:
@@ -358,9 +351,7 @@
  character(len=StrKIND),pointer:: p3_lookup_file_dir
  logical,pointer:: p3_trplMomI,p3_liqfrac,p3_predictNc,p3_aerosols
  integer,pointer:: p3_nCat,p3_autoAccr_param
- integer,pointer:: idx_qit,idx_qni,idx_qir,idx_qib,idx_qzi,idx_qli
  integer:: p3_stat
- integer:: nCat_layout
 
 !CCPP-compliant flags:
  character(len=StrKIND):: errmsg
@@ -406,34 +397,6 @@
        call mpas_pool_get_config(configs,'config_p3_liqfrac'        ,p3_liqfrac        )
        call mpas_pool_get_config(configs,'config_p3_predictNc'      ,p3_predictNc      )
        call mpas_pool_get_config(configs,'config_p3_autoAccr_param' ,p3_autoAccr_param )
-
-       !the scalars of ice category c are at index_p3_xxx + c-1; p3_qit is in the moist group, apart from the
-       !other P3 scalars, so the number of allocated categories is the spacing between p3_qni and p3_qir. it has
-       !to match config_p3_nCat, and p3_qzi and p3_qli are allocated only with triple-moment ice and predicted
-       !liquid fraction:
-       call mpas_pool_get_dimension(state,'index_p3_qit',idx_qit)
-       call mpas_pool_get_dimension(state,'index_p3_qni',idx_qni)
-       call mpas_pool_get_dimension(state,'index_p3_qir',idx_qir)
-       call mpas_pool_get_dimension(state,'index_p3_qib',idx_qib)
-       call mpas_pool_get_dimension(state,'index_p3_qzi',idx_qzi)
-       call mpas_pool_get_dimension(state,'index_p3_qli',idx_qli)
-       nCat_layout = idx_qir - idx_qni
-       if(nCat_layout < 1 .or. nCat_layout > 3 .or. idx_qib-idx_qir /= nCat_layout) then
-          write(mpas_err_message,'(A,5(A,I0))') 'P3 scalars are not laid out by ice category:', &
-               ' index_p3_qit=',idx_qit,' index_p3_qni=',idx_qni,' index_p3_qir=',idx_qir, &
-               ' index_p3_qib=',idx_qib,' number of categories=',nCat_layout
-          call physics_error_fatal(trim(mpas_err_message))
-       endif
-       if(nCat_layout /= p3_nCat) then
-          write(mpas_err_message,'(A,I0,A,I0)') 'number of allocated P3 ice categories = ',nCat_layout, &
-               ' does not match config_p3_nCat = ',p3_nCat
-          call physics_error_fatal(trim(mpas_err_message))
-       endif
-       if((p3_trplMomI .neqv. idx_qzi > 0) .or. (p3_liqfrac .neqv. idx_qli > 0)) then
-          write(mpas_err_message,'(A,L1,A,I0,A,L1,A,I0)') 'config_p3_trplMomI = ',p3_trplMomI, &
-               ' with index_p3_qzi = ',idx_qzi,', config_p3_liqfrac = ',p3_liqfrac,' with index_p3_qli = ',idx_qli
-          call physics_error_fatal(trim(mpas_err_message))
-       endif
 
        !warm-rain autoconversion and accretion: P3 has no branch for values other than 1, 2 and 3, and would
        !then switch off autoconversion, self-collection and accretion:
@@ -507,7 +470,7 @@
  integer:: sigw_opt
  real(kind=RKIND):: sigw_l,zagl
  real(kind=RKIND):: rain_step_mm,snow_step_mm,graup_step_mm,ice_step_mm,sr_step
- real(kind=RKIND),dimension(:),allocatable:: th1d,pi1d,t1d,p1d,w1d,sigw1d,dz1d
+ real(kind=RKIND),dimension(:),allocatable:: t1d,p1d,w1d,sigw1d,dz1d
  real(kind=RKIND),dimension(:),allocatable:: qv1d,qc1d,qr1d,qi1d,qs1d,qg1d,ni1d,nr1d,nc1d,nwfa1d,nifa1d
  real(kind=RKIND),dimension(:),allocatable:: thold1d,qvold1d
  real(kind=RKIND),dimension(:),allocatable:: rainprod1d,evapprod1d,zdbz1d,effc1d,effiave1d
@@ -649,7 +612,7 @@
        call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols)
 
        !the P3 ice-category scalars are read from and written to state%scalars directly; the scalars of
-       !category c are at index_p3_xxx + c-1 (checked in init_microphysics):
+       !category c are at index_p3_xxx + c-1:
        call mpas_pool_get_array(state,'scalars',scalars,time_lev)
        call mpas_pool_get_dimension(state,'index_p3_qit',idx_qit)
        call mpas_pool_get_dimension(state,'index_p3_qni',idx_qni)
@@ -658,20 +621,18 @@
        call mpas_pool_get_dimension(state,'index_p3_qzi',idx_qzi)
        call mpas_pool_get_dimension(state,'index_p3_qli',idx_qli)
 
-       !bulk ice density, mass-weighted fall speed and mean diameter of each ice category (0 where the category
-       !is empty) from the last call; output-only diagnostics, except p3_rhoi which is also used in p3cu_add_tend
-       !(mpas_atmphys_p3_cumix) to choose the ice category of the ice detrained by convection (config_p3_nCat > 1):
+       !bulk density, mass-weighted fall speed and mean diameter of each ice category (0 where the category is
+       !empty), from the last substep. p3_rhoi is also used in p3cu_add_tend (mpas_atmphys_p3_cumix) to choose
+       !the ice category of the ice detrained by convection when config_p3_nCat > 1:
        call mpas_pool_get_array(diag_physics,'p3_rhoi',p3_rhoi)
        call mpas_pool_get_array(diag_physics,'p3_vmi' ,p3_vmi )
        call mpas_pool_get_array(diag_physics,'p3_dmi' ,p3_dmi )
 
-       !sub-grid vertical velocity for droplet activation, at layer centres (as in the WRF/CM1 P3 path,
-       !w' = sqrt(2/3 TKE) assuming isotropic turbulence). MYNN: TKE = qke/2 (qke = q^2, layer centres;
-       !tke_pbl is not filled by MYNN in MPAS). YSU (no TKE): sigma_w = kzh/l; kzh (YSU exch_h) is on the
-       !lower face of each layer and is averaged onto layer centres. Inside the PBL (layer-centre height AGL <
-       !hpbl), l = c*hpbl with c = 0.1 (minimum 10 m): the peak of the YSU K-profile, ~0.08 w* h, then gives
-       !~0.65 w*, the peak of the Lenschow et al. (1980) sigma_w profile. Above the PBL, l = 30 m, the mixing
-       !length (rlam) of the YSU free-atmosphere closure. Other PBL schemes: no sub-grid term.
+       !sub-grid vertical velocity for droplet activation, at layer centres (as in WRF/CM1 P3: w' = sqrt(2/3 TKE),
+       !isotropic turbulence). MYNN: TKE = qke/2 (MYNN does not fill tke_pbl in MPAS). YSU (no TKE): w' = kzh/l,
+       !with kzh averaged from the lower faces of the layers onto the layer centres; l = 0.1*hpbl (>= 10 m) inside
+       !the PBL, which gives ~0.65 w* at the peak of the YSU K-profile, the peak of the Lenschow et al. (1980)
+       !profile, and l = 30 m (mixing length of the YSU free-atmosphere closure) above it. Other PBL schemes: 0.
        call mpas_pool_get_config(configs,'config_pbl_scheme',pbl_scheme)
        call mpas_pool_get_array(diag_physics,'sigw_p3',sigw_p3)
        sigw_opt = 0
@@ -684,7 +645,7 @@
           sigw_opt = 2
        endif
 
-       allocate(th1d(kts:kte),pi1d(kts:kte),t1d(kts:kte),p1d(kts:kte),w1d(kts:kte),sigw1d(kts:kte),dz1d(kts:kte))
+       allocate(t1d(kts:kte),p1d(kts:kte),w1d(kts:kte),sigw1d(kts:kte),dz1d(kts:kte))
        allocate(qv1d(kts:kte),qc1d(kts:kte),qr1d(kts:kte),qi1d(kts:kte),qs1d(kts:kte),qg1d(kts:kte))
        allocate(ni1d(kts:kte),nr1d(kts:kte),nc1d(kts:kte),nwfa1d(kts:kte),nifa1d(kts:kte))
        allocate(thold1d(kts:kte),qvold1d(kts:kte))
@@ -693,15 +654,14 @@
        allocate(qzi1d(kts:kte,p3_nCat),qli1d(kts:kte,p3_nCat))
        allocate(vmi1d(kts:kte,p3_nCat),dmi1d(kts:kte,p3_nCat),rhoi1d(kts:kte,p3_nCat),dhmax1d(kts:kte,p3_nCat))
 
-       rainprod_p(its:ite,kts:kte,jts:jte) = 0._RKIND
-       evapprod_p(its:ite,kts:kte,jts:jte) = 0._RKIND
-
        do j = jts,jte
        do i = its,ite
 
           !copy the column to the P3 arrays:
           do k = kts,kte
-             th1d(k) = th_p(i,k,j)
+             !"old" theta and qv = state at the start of the microphysics time step (all substeps):
+             thold1d(k) = th_p(i,k,j)
+             qvold1d(k) = qv_p(i,k,j)
              qv1d(k) = qv_p(i,k,j)
              qc1d(k) = qc_p(i,k,j)
              qr1d(k) = qr_p(i,k,j)
@@ -736,18 +696,7 @@
              if(sigw1d(k) < 0._RKIND) sigw1d(k) = 0._RKIND
              sigw_p3(k,i) = sigw1d(k)
 
-             pi1d(k) = pi_p(i,k,j)
-             t1d(k)  = th1d(k) * pi1d(k)
-
-             !bulk ice mass and number = sums over the ice categories; qs and qg are not used by P3:
-             qi1d(k) = 0._RKIND
-             ni1d(k) = 0._RKIND
-             do c = 1,p3_nCat
-                qi1d(k) = qi1d(k) + scalars(idx_qit+c-1,k,i)
-                ni1d(k) = ni1d(k) + scalars(idx_qni+c-1,k,i)
-             enddo
-             qs1d(k) = 0._RKIND
-             qg1d(k) = 0._RKIND
+             t1d(k)  = th_p(i,k,j) * pi_p(i,k,j)
              nc1d(k) = nc_p(i,k,j)
              if(p3_aerosols) then
                 nwfa1d(k) = nwfa_p(i,k,j)
@@ -774,30 +723,13 @@
                 else
                    qli1d(k,c) = 0._RKIND
                 endif
-                vmi1d(k,c)   = 0._RKIND
-                dmi1d(k,c)   = 0._RKIND
-                rhoi1d(k,c)  = 0._RKIND
-                dhmax1d(k,c) = 0._RKIND
              enddo
-          enddo
-
-          !"old" theta and qv = state at the start of the microphysics time step (all substeps):
-          thold1d(:) = th1d(:)
-          qvold1d(:) = qv1d(:)
-
-          do k = kts,kte
-             zdbz1d(k) = -35._RKIND
           enddo
 
           do istep = 1,n_microp
 
-             rain_step_mm  = 0._RKIND
-             snow_step_mm  = 0._RKIND
-             graup_step_mm = 0._RKIND
-             ice_step_mm   = 0._RKIND
-             sr_step       = 0._RKIND
-             rainprod1d    = 0._RKIND
-             evapprod1d    = 0._RKIND
+             rain_step_mm = 0._RKIND
+             snow_step_mm = 0._RKIND
 
              call mp_p3_wrapper_mpas( &
                   qv1d,qc1d,qi1d,qr1d,qs1d,qg1d,ni1d,nr1d,nc1d,nwfa1d,nifa1d,thold1d,qvold1d, &
@@ -839,29 +771,13 @@
 
           enddo
 
-          !bulk ice mass and number = sums over the ice categories, qs = qg = 0:
+          !copy the column back (the Exner function is not changed by the microphysics). The bulk qi, qs, qg
+          !and ni returned by P3 are not used: qi_p, qs_p, qg_p and ni_p are filled in MPAS_to_physics.
           do k = kts,kte
-             qi1d(k) = 0._RKIND
-             ni1d(k) = 0._RKIND
-             qs1d(k) = 0._RKIND
-             qg1d(k) = 0._RKIND
-             do c = 1,p3_nCat
-                qi1d(k) = qi1d(k) + qit1d(k,c)
-                ni1d(k) = ni1d(k) + qni1d(k,c)
-             enddo
-          enddo
-
-          !copy the column back (the Exner function is not changed by the microphysics):
-          do k = kts,kte
-             th1d(k) = t1d(k) / pi1d(k)
-             th_p(i,k,j) = th1d(k)
+             th_p(i,k,j) = t1d(k) / pi_p(i,k,j)
              qv_p(i,k,j) = qv1d(k)
              qc_p(i,k,j) = qc1d(k)
              qr_p(i,k,j) = qr1d(k)
-             qi_p(i,k,j) = qi1d(k)
-             qs_p(i,k,j) = qs1d(k)
-             qg_p(i,k,j) = qg1d(k)
-             ni_p(i,k,j) = ni1d(k)
              nr_p(i,k,j) = nr1d(k)
              nc_p(i,k,j) = nc1d(k)
              if(p3_aerosols) then
@@ -896,7 +812,7 @@
        enddo
        enddo
 
-       deallocate(th1d,pi1d,t1d,p1d,w1d,sigw1d,dz1d)
+       deallocate(t1d,p1d,w1d,sigw1d,dz1d)
        deallocate(qv1d,qc1d,qr1d,qi1d,qs1d,qg1d,ni1d,nr1d,nc1d,nwfa1d,nifa1d)
        deallocate(thold1d,qvold1d)
        deallocate(rainprod1d,evapprod1d,zdbz1d,effc1d,effiave1d)

@@ -428,6 +428,7 @@
                 enddo
                 enddo
                 enddo
+                !P3: all ice goes through the RRTMG snow optics, with the P3 effective radius (re_ice):
                 if(microp_scheme == "mp_p3") call p3_radiation_re(its,ite)
              else
                 ! These are set in module mpas_atmphys_manager and should not be set again

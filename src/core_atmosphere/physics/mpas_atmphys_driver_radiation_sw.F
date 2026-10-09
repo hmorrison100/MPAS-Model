@@ -510,6 +510,7 @@
                 enddo
                 enddo
                 enddo
+                !P3: all ice goes through the RRTMG snow optics, with the P3 effective radius (re_ice):
                 if(microp_scheme == "mp_p3") call p3_radiation_re(its,ite)
              else
                 ! These are set in module mpas_atmphys_manager and should not be set again
@@ -1062,8 +1063,10 @@
 !P3 effective radii for RRTMG, called by the short wave and long wave drivers after re_cloud and re_ice were copied
 !to recloud_p and reice_p. All P3 ice goes through the RRTMG snow optics (driver_cloudiness, subroutine
 !p3_ice_to_radiative_snow, moved the ice mass to qsrad_p): resnow_p is re_ice bounded to 10-130 microns (25 microns
-!where re_ice is not a valid size), and the radiative cloud ice, which is zero, gets 10 microns. recloud_p is floored
-!to 2.5 microns, with 10.5 (ocean) or 7.5 (land) microns in cloudy cells.
+!where re_ice is not a valid size), and the radiative cloud ice, which is zero, gets 10 microns. For re_ice > 130
+!microns, p3_ice_to_radiative_snow scaled the mass by 130/re_ice, so that the optical depth (~ ice water path / re)
+!is kept with resnow_p = 130 microns. recloud_p is floored to 2.5 microns, with 10.5 (ocean) or 7.5 (land) microns
+!in cloudy cells.
 
 !input arguments:
  integer,intent(in):: its,ite

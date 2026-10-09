@@ -63,7 +63,6 @@
 
  call mpas_pool_get_config(configs,'config_microp_scheme',config_microp_scheme)
 
- nullify(config_p3_nCat)
  call mpas_pool_get_config(configs,'config_p3_nCat',config_p3_nCat)
 
  nullify(mp_kessler_in)
@@ -116,13 +115,6 @@
  elseif(config_microp_scheme == 'mp_thompson_aerosols') then
     mp_thompson_aers_in = .true.
  elseif(config_microp_scheme == 'mp_p3') then
-    if(.not.associated(config_p3_nCat)) then
-       call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
-       call mpas_log_write('* Error: config_p3_nCat is required for mp_p3 package setup.',messageType=MPAS_LOG_ERR)
-       call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
-       ierr = 1
-       return
-    endif
     if(config_p3_nCat < 1 .or. config_p3_nCat > 3) then
        call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
        call mpas_log_write('* Error: config_p3_nCat must be 1, 2, or 3 for mp_p3.',messageType=MPAS_LOG_ERR)
@@ -217,20 +209,13 @@
  call mpas_log_write('    bl_ysu_in               = $l', logicArgs=(/bl_ysu_in/))
  call mpas_log_write('')
 
-!--- initialization of the packages for the optional P3 prognostic scalars. Registry packages are OR-lists, so that
-!    each (option, category) combination has its own package. The *_nop3_in packages are the PBL and convection
-!    packages restricted to microphysics schemes other than P3: the bulk qi, qs and ni scalars they require are not
-!    allocated with P3, which predicts its own ice categories (p3_* scalars). mp_p3_icice_in allocates the bulk qi,
-!    qs and qg scalars with P3, only so that the ice of the initial conditions is read and converted to P3 ice
-!    (config_p3_ic_bulk_ice). These packages are set after the PBL and convection packages.
+!--- initialization of the packages for the optional P3 prognostic scalars (one package per option and ice category).
+!    The *_nop3_in packages are the PBL and convection packages without P3, which has no bulk qi, qs and ni scalars;
+!    mp_p3_icice_in allocates qi, qs and qg with P3 to read the ice of the initial conditions (config_p3_ic_bulk_ice).
 
- nullify(config_p3_trplMomI)
  call mpas_pool_get_config(configs,'config_p3_trplMomI',config_p3_trplMomI)
- nullify(config_p3_liqfrac)
  call mpas_pool_get_config(configs,'config_p3_liqfrac',config_p3_liqfrac)
- nullify(config_p3_aerosols)
  call mpas_pool_get_config(configs,'config_p3_aerosols',config_p3_aerosols)
- nullify(config_p3_ic_bulk_ice)
  call mpas_pool_get_config(configs,'config_p3_ic_bulk_ice',config_p3_ic_bulk_ice)
 
  nullify(mp_p3_3mom_in)
@@ -258,14 +243,12 @@
  nullify(cu_ntiedtke_nop3_in)
  call mpas_pool_get_package(packages,'cu_ntiedtke_nop3_inActive',cu_ntiedtke_nop3_in)
 
- if(.not.associated(config_p3_trplMomI   ) .or. .not.associated(config_p3_liqfrac  ) .or. &
-    .not.associated(config_p3_aerosols   ) .or. .not.associated(mp_p3_aers_in      ) .or. &
-    .not.associated(config_p3_ic_bulk_ice) .or. .not.associated(mp_p3_icice_in     ) .or. &
-    .not.associated(mp_p3_3mom_in        ) .or. .not.associated(mp_p3_3mom_cat2_in ) .or. &
-    .not.associated(mp_p3_3mom_cat3_in   ) .or. .not.associated(mp_p3_lf_in        ) .or. &
-    .not.associated(mp_p3_lf_cat2_in     ) .or. .not.associated(mp_p3_lf_cat3_in   ) .or. &
-    .not.associated(mp_p3_pbl_in         ) .or. .not.associated(bl_ysu_nop3_in     ) .or. &
-    .not.associated(bl_mynn_nop3_in      ) .or. .not.associated(cu_ntiedtke_nop3_in)) then
+ if(.not.associated(mp_p3_3mom_in     ) .or. .not.associated(mp_p3_3mom_cat2_in ) .or. &
+    .not.associated(mp_p3_3mom_cat3_in) .or. .not.associated(mp_p3_lf_in        ) .or. &
+    .not.associated(mp_p3_lf_cat2_in  ) .or. .not.associated(mp_p3_lf_cat3_in   ) .or. &
+    .not.associated(mp_p3_pbl_in      ) .or. .not.associated(mp_p3_aers_in      ) .or. &
+    .not.associated(mp_p3_icice_in    ) .or. .not.associated(bl_ysu_nop3_in     ) .or. &
+    .not.associated(bl_mynn_nop3_in   ) .or. .not.associated(cu_ntiedtke_nop3_in)) then
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
     call mpas_log_write('* Error while setting up packages for P3 optional prognostic scalars.',messageType=MPAS_LOG_ERR)
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
