@@ -911,6 +911,7 @@
 			<var name="rqvblten"/>
 			<var name="rqcblten"/>
 			<var name="rqiblten"/>
+			<var name="rp3blten"/>
 			<var name="rqsblten"/>
 			<var name="rncblten"/>
 			<var name="rniblten"/>
