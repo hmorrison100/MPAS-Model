@@ -11,7 +11,7 @@
  use mpas_pool_routines
  use mpas_timer,only: mpas_timer_start,mpas_timer_stop
 
- use mpas_atmphys_driver_radiation_sw, only: radconst
+ use mpas_atmphys_driver_radiation_sw, only: radconst,p3_radiation_re
  use mpas_atmphys_constants
  use mpas_atmphys_manager, only: gmt,curr_julday,julday,year
  use mpas_atmphys_camrad_init
@@ -331,7 +331,6 @@
 !local variables and arrays:
  integer:: ncols,nlevs
  integer:: i,j,k,n
- real(kind=RKIND):: rei_native,rei_um
  real(kind=RKIND),dimension(:,:),allocatable:: p2d,o32d
 
 !-----------------------------------------------------------------------------------------------------------------
@@ -414,74 +413,7 @@
  radiation_lw_select: select case (trim(radt_lw_scheme))
     case("rrtmg_lw")
        microp_select: select case(microp_scheme)
-          case("mp_p3")
-             if(config_microp_re) then
-                call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
-                call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
-
-                !P3 ice goes through the RRTMG snow optics with the P3 effective radius (re_ice), bounded to
-                !10-130 microns. The ice mass was moved to the radiative snow (qsrad_p), once for both the short
-                !wave and long wave codes, in driver_cloudiness (p3_ice_to_radiative_snow), which also scales the
-                !mass by 130/re_ice for re_ice > 130 microns; the radiative cloud ice is zero.
-                has_reqc = 1
-                has_reqi = 1
-                has_reqs = 1
-
-                do j = jts,jte
-                do k = kts,kte
-                do i = its,ite
-                   if(re_cloud(k,i) > 0._RKIND .and. re_cloud(k,i) < 1.0e-2_RKIND) then
-                      recloud_p(i,k,j) = max(2.5e-6_RKIND,re_cloud(k,i))
-                   else
-                      recloud_p(i,k,j) = 2.5e-6_RKIND
-                   endif
-                   if(recloud_p(i,k,j) <= 2.5e-6_RKIND .and. cldfrac_p(i,k,j) > 0._RKIND) then
-                      if((xland_p(i,j) - 1.5_RKIND) > 0._RKIND) then
-                         recloud_p(i,k,j) = 10.5e-6_RKIND
-                      elseif((xland_p(i,j) - 1.5_RKIND) < 0._RKIND) then
-                         recloud_p(i,k,j) = 7.5e-6_RKIND
-                      endif
-                   endif
-
-                   if(re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
-                      rei_native = re_ice(k,i)
-                   else
-                      rei_native = 25.0e-6_RKIND
-                   endif
-                   rei_um = rei_native * 1.0e6_RKIND
-
-                   if(rei_um > 130.0_RKIND) then
-                      resnow_p(i,k,j) = 130.0e-6_RKIND
-                   else
-                      resnow_p(i,k,j) = max(10.0e-6_RKIND,rei_native)
-                   endif
-
-                   reice_p(i,k,j) = 10.0e-6_RKIND
-                enddo
-                enddo
-                enddo
-             else
-                do j = jts,jte
-                do k = kts,kte
-                do i = its,ite
-                   recloud_p(i,k,j) = 0._RKIND
-                   reice_p(i,k,j)   = 0._RKIND
-                   resnow_p(i,k,j)  = 0._RKIND
-                enddo
-                enddo
-                enddo
-             endif
-             do j = jts,jte
-             do k = kts,kte
-             do i = its,ite
-                rrecloud_p(i,k,j) = 0._RKIND
-                rreice_p(i,k,j)   = 0._RKIND
-                rresnow_p(i,k,j)  = 0._RKIND
-             enddo
-             enddo
-             enddo
-
-          case("mp_thompson","mp_thompson_aerosols","mp_wsm6")
+          case("mp_thompson","mp_thompson_aerosols","mp_wsm6","mp_p3")
              if(config_microp_re) then
                 call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
                 call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
@@ -496,6 +428,7 @@
                 enddo
                 enddo
                 enddo
+                if(microp_scheme == "mp_p3") call p3_radiation_re(its,ite)
              else
                 ! These are set in module mpas_atmphys_manager and should not be set again
                 !has_reqc = 0

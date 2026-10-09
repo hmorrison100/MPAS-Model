@@ -272,7 +272,7 @@
  do j = jts,jte
  do k = kts,kte
  do i = its,ite
-    !same default as in the radiation drivers where re_ice is not a valid size:
+    !same default as in p3_radiation_re (driver_radiation_sw) where re_ice is not a valid size:
     if(re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
        rei_um = re_ice(k,i) * 1.0e6_RKIND
     else
