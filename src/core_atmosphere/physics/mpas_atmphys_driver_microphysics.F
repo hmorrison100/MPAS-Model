@@ -357,12 +357,9 @@
 !local pointers and variables specific to the P3 cloud microphysics:
  character(len=StrKIND),pointer:: p3_lookup_file_dir
  logical,pointer:: p3_trplMomI,p3_liqfrac,p3_predictNc,p3_aerosols
- logical,pointer:: p3_abort_on_err,p3_dowr,p3_debug_on,p3_scpf_on
- integer,pointer:: p3_nCat,p3_autoAccr_param,p3_freq3Ddiag
+ integer,pointer:: p3_nCat,p3_autoAccr_param
  integer,pointer:: idx_qit,idx_qni,idx_qir,idx_qib,idx_qzi,idx_qli
- real(kind=RKIND),pointer:: p3_clbfact_dep,p3_clbfact_sub,p3_scpf_pfrac,p3_scpf_resfact
  integer:: p3_stat
- integer:: p3_autoAccr_loc
  integer:: nCat_layout
 
 !CCPP-compliant flags:
@@ -408,16 +405,7 @@
        call mpas_pool_get_config(configs,'config_p3_trplMomI'       ,p3_trplMomI       )
        call mpas_pool_get_config(configs,'config_p3_liqfrac'        ,p3_liqfrac        )
        call mpas_pool_get_config(configs,'config_p3_predictNc'      ,p3_predictNc      )
-       call mpas_pool_get_config(configs,'config_p3_abort_on_err'   ,p3_abort_on_err   )
-       call mpas_pool_get_config(configs,'config_p3_dowr'           ,p3_dowr           )
        call mpas_pool_get_config(configs,'config_p3_autoAccr_param' ,p3_autoAccr_param )
-       call mpas_pool_get_config(configs,'config_p3_debug_on'       ,p3_debug_on       )
-       call mpas_pool_get_config(configs,'config_p3_scpf_on'        ,p3_scpf_on        )
-       call mpas_pool_get_config(configs,'config_p3_clbfact_dep'    ,p3_clbfact_dep    )
-       call mpas_pool_get_config(configs,'config_p3_clbfact_sub'    ,p3_clbfact_sub    )
-       call mpas_pool_get_config(configs,'config_p3_scpf_pfrac'     ,p3_scpf_pfrac     )
-       call mpas_pool_get_config(configs,'config_p3_scpf_resfact'   ,p3_scpf_resfact   )
-       call mpas_pool_get_config(configs,'config_p3_freq3Ddiag'     ,p3_freq3Ddiag     )
 
        !the scalars of ice category c are at index_p3_xxx + c-1; p3_qit is in the moist group, apart from the
        !other P3 scalars, so the number of allocated categories is the spacing between p3_qni and p3_qir. it has
@@ -447,22 +435,13 @@
           call physics_error_fatal(trim(mpas_err_message))
        endif
 
-       !warm-rain autoconversion and accretion: 1 = Seifert and Beheng (2001), 2 = Khairoutdinov and Kogan
-       !(2000), 3 = Kogan (2013). P3 has no branch for any other value, so that passing the Registry default (0)
-       !would switch off autoconversion, self-collection and accretion. 0 is treated as "not set" and replaced
-       !by the P3 default (2):
-       select case(p3_autoAccr_param)
-          case(0)
-             p3_autoAccr_loc = 2
-          case(1:3)
-             p3_autoAccr_loc = p3_autoAccr_param
-          case default
-             write(mpas_err_message,'(A,I0,A)') 'config_p3_autoAccr_param = ',p3_autoAccr_param, &
-                  ' is invalid (valid: 1, 2, 3, or 0 for the P3 default of 2)'
-             call physics_error_fatal(trim(mpas_err_message))
-       end select
-       call mpas_log_write('--- P3 warm-rain autoconversion/accretion option (autoAccr_param) = $i', &
-                           intArgs=(/p3_autoAccr_loc/))
+       !warm-rain autoconversion and accretion: P3 has no branch for values other than 1, 2 and 3, and would
+       !then switch off autoconversion, self-collection and accretion:
+       if(p3_autoAccr_param < 1 .or. p3_autoAccr_param > 3) then
+          write(mpas_err_message,'(A,I0,A)') 'config_p3_autoAccr_param = ',p3_autoAccr_param, &
+               ' is invalid (valid: 1, 2 or 3)'
+          call physics_error_fatal(trim(mpas_err_message))
+       endif
 
        !predicted aerosols require double-moment cloud water (P3 otherwise writes a warning to stdout at every
        !grid point and time step):
@@ -472,12 +451,9 @@
        !P3 lookup tables and parameters:
        p3_stat = 0
        call p3_init_for_mpas(dminfo,trim(p3_lookup_file_dir),p3_nCat,p3_trplMomI,p3_liqfrac,      &
-                             stat=p3_stat,abort_on_err=p3_abort_on_err,model='WRF',dowr=p3_dowr, &
-                             autoAccr_param_in=p3_autoAccr_loc,debug_on=p3_debug_on,             &
-                             scpf_on=p3_scpf_on,p3_aerosols=p3_aerosols,                         &
-                             clbfact_dep=p3_clbfact_dep,clbfact_sub=p3_clbfact_sub,              &
-                             scpf_pfrac=p3_scpf_pfrac,scpf_resfact=p3_scpf_resfact,              &
-                             freq3Ddiag_in=p3_freq3Ddiag,predictNc=p3_predictNc)
+                             stat=p3_stat,abort_on_err=.true.,model='WRF',                        &
+                             autoAccr_param_in=p3_autoAccr_param,p3_aerosols=p3_aerosols,         &
+                             predictNc=p3_predictNc)
        if(p3_stat /= 0) then
           write(mpas_err_message,'(A,I0)') 'p3_init_for_mpas failed, stat = ',p3_stat
           call physics_error_fatal(trim(mpas_err_message))
