@@ -150,8 +150,7 @@
 
 !local pointers:
  character(len=StrKIND),pointer:: microp_scheme,pbl_scheme
- integer, pointer :: p3_nCat
- logical, pointer :: p3_aerosols
+ logical,pointer:: p3_aerosols
 
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -194,18 +193,14 @@
        if(.not.allocated(nifa_p)) allocate(nifa_p(ims:ime,kms:kme,jms:jme))
        if(.not.allocated(nwfa_p)) allocate(nwfa_p(ims:ime,kms:kme,jms:jme))
 
-     case("mp_p3")
-        call mpas_pool_get_config(configs,'config_p3_nCat',p3_nCat)
-        ! P3 always predicts nc. The aerosol numbers nwfa/nifa (shared with Thompson aerosol-aware design)
-        ! exist only with predicted aerosols (config_p3_aerosols, package mp_p3_aers_in):
-        call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols)
-        if(.not.allocated(nc_p))   allocate(nc_p(ims:ime,kms:kme,jms:jme))
-        if(p3_aerosols) then
-           if(.not.allocated(nifa_p)) allocate(nifa_p(ims:ime,kms:kme,jms:jme))
-           if(.not.allocated(nwfa_p)) allocate(nwfa_p(ims:ime,kms:kme,jms:jme))
-        endif
-        ! P3 category prognostics live only in state%scalars (MPAS-compatible). No 4-D work arrays.
-        ! qzi / qli arrays are always allocated for robustness; populate/ignore based on config flags
+    case("mp_p3")
+       !nc is always predicted, nifa and nwfa only with predicted aerosols:
+       call mpas_pool_get_config(configs,'config_p3_aerosols',p3_aerosols)
+       if(.not.allocated(nc_p)) allocate(nc_p(ims:ime,kms:kme,jms:jme))
+       if(p3_aerosols) then
+          if(.not.allocated(nifa_p)) allocate(nifa_p(ims:ime,kms:kme,jms:jme))
+          if(.not.allocated(nwfa_p)) allocate(nwfa_p(ims:ime,kms:kme,jms:jme))
+       endif
 
     case default
  end select microp_select
@@ -285,10 +280,11 @@
        if(allocated(nifa_p)) deallocate(nifa_p)
        if(allocated(nwfa_p)) deallocate(nwfa_p)
 
-     case("mp_p3")
-        if(allocated(nc_p))   deallocate(nc_p)
-        if(allocated(nifa_p)) deallocate(nifa_p)
-        if(allocated(nwfa_p)) deallocate(nwfa_p)
+    case("mp_p3")
+       if(allocated(nc_p)  ) deallocate(nc_p  )
+       if(allocated(nifa_p)) deallocate(nifa_p)
+       if(allocated(nwfa_p)) deallocate(nwfa_p)
+
     case default
  end select microp_select
 
@@ -435,10 +431,11 @@
     rho_p(i,k,j) = zz(k,i) * rho_zz(k,i)
     rho_p(i,k,j) = rho_p(i,k,j)*(1._RKIND + qv_p(i,k,j))
     th_p(i,k,j)  = theta_m(k,i) / (1._RKIND + R_v/R_d * qv_p(i,k,j))
+    t_p(i,k,j)   = th_p(i,k,j)*exner(k,i)
 
-    t_p(i,k,j)    = th_p(i,k,j) * exner(k,i)
     pi_p(i,k,j)   = exner(k,i)
     pres_p(i,k,j) = pressure_p(k,i) + pressure_b(k,i)
+
     zmid_p(i,k,j) = 0.5*(zgrid(k+1,i)+zgrid(k,i))
     dz_p(i,k,j)   = zgrid(k+1,i)-zgrid(k,i)
 
@@ -733,37 +730,12 @@ end subroutine pre_microphysics
  real(kind=RKIND),dimension(:,:,:),pointer:: scalars
 
 !local variables:
- integer:: i,k,j,c
- integer :: nScalarTot
- integer :: nCat_layout
+ integer:: i,k,j
 
- logical, save :: p3dbg_banner_printed = .false.
- logical, save :: p3dbg_to_indices_checked = .false.
- character(len=1024) :: dbgmsg
-
-
- real(kind=RKIND) :: p3_kappa, p3_inv1mk
- real(kind=RKIND) :: moistfac, qvpos
- real(kind=RKIND) :: rho_d_tmp
- ! --- P3 config ---
- integer, pointer :: p3_nCat
- logical, pointer :: p3_trplMomI, p3_liqfrac
- logical, pointer :: p3_debug_on
- ! --- P3 tracer base indices in scalars(:,:,:) ---
- integer, pointer :: index_p3_qit, index_p3_qni, index_p3_qir, index_p3_qib
- integer, pointer :: index_p3_qzi, index_p3_qli
- !-----------------------------------------------------------------------------------------------------------------
+!-----------------------------------------------------------------------------------------------------------------
 
  call mpas_pool_get_config(configs,'config_microp_scheme',mp_scheme)
- call mpas_pool_get_config(configs,'config_p3_debug_on',p3_debug_on)
 
-
-
-   
-
-
- p3_kappa  = R_d/cp
- p3_inv1mk = 1._RKIND / (1._RKIND - p3_kappa)
  call mpas_pool_get_array(mesh,'zgrid',zgrid)
  call mpas_pool_get_array(mesh,'zz'   ,zz   )
 
@@ -835,6 +807,7 @@ end subroutine pre_microphysics
        enddo
        enddo
        enddo
+
        mp2_select: select case(trim(mp_scheme))
           case("mp_thompson","mp_thompson_aerosols")
              call mpas_pool_get_dimension(state,'index_ni',index_ni)
@@ -887,169 +860,80 @@ end subroutine pre_microphysics
 
           case default
        end select mp2_select
+
     case("mp_p3")
-       call mpas_pool_get_config(configs,'config_p3_nCat'    ,p3_nCat    )
-       call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI)
-       call mpas_pool_get_config(configs,'config_p3_liqfrac' ,p3_liqfrac )
+       !qi, qs, qg and ni are not allocated with mp_p3: qi and ni are the sums over the P3 ice categories of
+       !p3_qit and p3_qni, and qs and qg are zero (also used for the tendencies below):
+       call p3_sum_ice(state,scalars,its,ite)
+       qi => p3_qi_sum
+       qs => p3_zero_qsqg
+       qg => p3_zero_qsqg
+       ni => p3_ni_sum
 
-        if ((associated(p3_debug_on) .and. p3_debug_on) .and. .not. p3dbg_banner_printed) then
-           p3dbg_banner_printed = .true.
-        end if! MPAS bulk-compatible packing of bulk hydrometeors + number concentrations
-! so downstream MPAS diagnostics and radiation coupling see the same fields as Thompson.
-! qi, qs, qg and ni are not allocated with mp_p3 (qi, qs, qg are zero with config_p3_ic_bulk_ice): qi and ni are the sums over the P3 ice categories
-! of p3_qit and p3_qni, and qs and qg are zero (also used by the tendency diagnostics below).
-call p3_sum_ice(state,scalars,its,ite)
-qi => p3_qi_sum
-qs => p3_zero_qsqg
-qg => p3_zero_qsqg
-ni => p3_ni_sum
+       call mpas_pool_get_dimension(state,'index_nr',index_nr)
+       nr => scalars(index_nr,:,:)
 
-call mpas_pool_get_dimension(state,'index_nr',index_nr)
-nr => scalars(index_nr,:,:)
+       do j = jts,jte
+       do k = kts,kte
+       do i = its,ite
+          qi_p(i,k,j) = max(0._RKIND,qi(k,i))
+          qs_p(i,k,j) = max(0._RKIND,qs(k,i))
+          qg_p(i,k,j) = max(0._RKIND,qg(k,i))
+          ni_p(i,k,j) = max(0._RKIND,ni(k,i))
+          nr_p(i,k,j) = max(0._RKIND,nr(k,i))
+       enddo
+       enddo
+       enddo
 
-do j = jts, jte
-do k = kts, kte
-do i = its, ite
-   qi_p(i,k,j) = max(0._RKIND, qi(k,i))
-   qs_p(i,k,j) = max(0._RKIND, qs(k,i))
-   qg_p(i,k,j) = max(0._RKIND, qg(k,i))
-   ni_p(i,k,j) = max(0._RKIND, ni(k,i))
-   nr_p(i,k,j) = max(0._RKIND, nr(k,i))
-end do
-end do
-end do
-       if (.not. associated(scalars)) then
-          stop 'scalars not associated in microphysics_from_MPAS P3 branch'
-       end if
-       if (.not. allocated(nc_p)) then
-          stop 'nc_p not allocated in microphysics_from_MPAS'
-       end if
-       ! nwfa/nifa (and nwfa2d/nifa2d) exist only with predicted aerosols (config_p3_aerosols, package
-       ! mp_p3_aers_in); f_nifa and f_nwfa are then true:
-       if (f_nifa .and. f_nwfa .and. (.not. allocated(nifa_p) .or. .not. allocated(nwfa_p))) then
-          stop 'P3 aerosol number arrays not allocated in microphysics_from_MPAS'
-       end if
-! Aerosol-aware inputs (reuse MPAS aerosol-aware aerosol-aware tracers/diagnostics)
-call mpas_pool_get_dimension(state,'index_nc'  ,index_nc  )
-nc   => scalars(index_nc,:,:)
-if (f_nifa .and. f_nwfa) then
-   call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
-   call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
-   nifa => scalars(index_nifa,:,:)
-   nwfa => scalars(index_nwfa,:,:)
-end if
+       !nc is always predicted; nifa, nwfa, nifa2d and nwfa2d exist only with predicted aerosols (f_nifa and
+       !f_nwfa are then true):
+       call mpas_pool_get_dimension(state,'index_nc',index_nc)
+       nc => scalars(index_nc,:,:)
+       if(f_nifa .and. f_nwfa) then
+          call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
+          call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
+          nifa => scalars(index_nifa,:,:)
+          nwfa => scalars(index_nwfa,:,:)
+       endif
 
-call mpas_pool_get_array(diag_physics,'nifa2d'  ,nifa2d  )
-call mpas_pool_get_array(diag_physics,'nwfa2d'  ,nwfa2d  )
-call mpas_pool_get_array(diag_physics,'rainprod',rainprod)
-call mpas_pool_get_array(diag_physics,'evapprod',evapprod)
-call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
-call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
-call mpas_pool_get_array(diag_physics,'re_snow' ,re_snow )
-       if (.not. associated(rainprod) .or. &
-           .not. associated(evapprod) .or. .not. associated(re_cloud) .or. .not. associated(re_ice) .or. &
-           .not. associated(re_snow)) then
-          stop 'P3: diag_physics aerosol arrays not associated'
-       end if
-       if (f_nifa .and. f_nwfa .and. (.not. associated(nifa2d) .or. .not. associated(nwfa2d))) then
-          stop 'P3: diag_physics aerosol arrays not associated'
-       end if
-       ! P3 aerosol / optics diagnostic work arrays must be allocated during
-       ! allocate_microphysics. Do not allocate them here: on restart runs this
-       ! routine can be reached immediately after restart-time output, when PIO
-       ! and restart buffers are still near the memory high-water mark.
-       if ((f_nifa .and. f_nwfa .and. (.not. allocated(nifa2d_p) .or. .not. allocated(nwfa2d_p))) .or. &
-           .not. allocated(rainprod_p) .or. &
-           .not. allocated(evapprod_p) .or. .not. allocated(recloud_p) .or. .not. allocated(reice_p) .or. &
-           .not. allocated(resnow_p)) then
-          call mpas_log_write('P3_MEMFIX_FATAL: P3 work arrays were not allocated in allocate_microphysics')
-          stop 'P3 work arrays must be allocated during allocate_microphysics'
-       end if
-do j = jts,jte
-if (f_nifa .and. f_nwfa) then
-   do i = its,ite
-      nifa2d_p(i,j) = nifa2d(i)
-      nwfa2d_p(i,j) = nwfa2d(i)
-   enddo
-   do k = kts,kte
-   do i = its,ite
-      nifa_p(i,k,j)    = nifa(k,i)
-      nwfa_p(i,k,j)    = nwfa(k,i)
-   enddo
-   enddo
-end if
-do k = kts,kte
-do i = its,ite
-   nc_p(i,k,j)      = nc(k,i)
-   ! P3 overwrites these with post-limiter internal process rates in the driver.
-   rainprod_p(i,k,j)= 0._RKIND
-   evapprod_p(i,k,j)= 0._RKIND
-   recloud_p(i,k,j) = re_cloud(k,i)
-   reice_p(i,k,j)   = re_ice(k,i)
-   resnow_p(i,k,j)  = re_snow(k,i)
-enddo
-enddo
-enddo
+       call mpas_pool_get_array(diag_physics,'nifa2d'  ,nifa2d  )
+       call mpas_pool_get_array(diag_physics,'nwfa2d'  ,nwfa2d  )
+       call mpas_pool_get_array(diag_physics,'rainprod',rainprod)
+       call mpas_pool_get_array(diag_physics,'evapprod',evapprod)
+       call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
+       call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
+       call mpas_pool_get_array(diag_physics,'re_snow' ,re_snow )
 
-        ! One-time sanity check of P3 scalar layout (avoid per-timestep spam)
-        if (.not. p3dbg_to_indices_checked) then
-           call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
-           call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
-           call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
-           call mpas_pool_get_dimension(state,'index_p3_qib',index_p3_qib)
+       do j = jts,jte
+          if(f_nifa .and. f_nwfa) then
+             do i = its,ite
+                nifa2d_p(i,j) = nifa2d(i)
+                nwfa2d_p(i,j) = nwfa2d(i)
+             enddo
+             do k = kts,kte
+             do i = its,ite
+                nifa_p(i,k,j) = nifa(k,i)
+                nwfa_p(i,k,j) = nwfa(k,i)
+             enddo
+             enddo
+          endif
+          do k = kts,kte
+          do i = its,ite
+             nc_p(i,k,j)       = nc(k,i)
+             !rainprod and evapprod are set to the rates of the last P3 substep in driver_microphysics:
+             rainprod_p(i,k,j) = 0._RKIND
+             evapprod_p(i,k,j) = 0._RKIND
+             recloud_p(i,k,j)  = re_cloud(k,i)
+             reice_p(i,k,j)    = re_ice(k,i)
+             resnow_p(i,k,j)   = re_snow(k,i)
+          enddo
+          enddo
+       enddo
 
-           nScalarTot  = size(scalars,1)
-           nCat_layout = index_p3_qir - index_p3_qni   ! p3_qit* are in the moist group
-
-           if (nCat_layout < 1 .or. nCat_layout > 3) then
-              write(dbgmsg,'(A,I0)') 'P3DBG_FATAL: invalid derived nCat_layout=', nCat_layout
-              call mpas_log_write(trim(dbgmsg))
-              stop 'P3 scalar layout/config mismatch'
-           end if
-
-           if (nCat_layout /= p3_nCat) then
-              write(dbgmsg,'(A,I0,A,I0)') 'P3DBG_FATAL: nCat_layout=', nCat_layout, ' != config_p3_nCat=', p3_nCat
-              call mpas_log_write(trim(dbgmsg))
-              stop 'P3 scalar layout/config mismatch'
-           end if
-
-           if ( index_p3_qit + p3_nCat - 1 > nScalarTot .or. &
-                index_p3_qni + p3_nCat - 1 > nScalarTot .or. &
-                index_p3_qir + p3_nCat - 1 > nScalarTot .or. &
-                index_p3_qib + p3_nCat - 1 > nScalarTot ) then
-              call mpas_log_write('P3DBG_FATAL: P3 scalar index out of range in microphysics_from_MPAS')
-              stop 'P3 scalar index out of range in microphysics_from_MPAS'
-           end if
-
-           if (p3_trplMomI) then
-              call mpas_pool_get_dimension(state,'index_p3_qzi',index_p3_qzi)
-              if ( index_p3_qzi + p3_nCat - 1 > nScalarTot ) then
-                 call mpas_log_write('P3DBG_FATAL: P3 qzi index out of range in microphysics_from_MPAS')
-                 stop 'P3 qzi index out of range in microphysics_from_MPAS'
-              end if
-           end if
-           if (p3_liqfrac) then
-              call mpas_pool_get_dimension(state,'index_p3_qli',index_p3_qli)
-              if ( index_p3_qli + p3_nCat - 1 > nScalarTot ) then
-                 call mpas_log_write('P3DBG_FATAL: P3 qli index out of range in microphysics_from_MPAS')
-                 stop 'P3 qli index out of range in microphysics_from_MPAS'
-              end if
-           end if
-
-           if (associated(p3_debug_on) .and. p3_debug_on) then
-              write(dbgmsg,'(A,I0,A,I0)') 'P3DBG_TO: nCat_layout=', nCat_layout, ' config_p3_nCat=', p3_nCat
-              call mpas_log_write(trim(dbgmsg))
-           end if
-
-           p3dbg_to_indices_checked = .true.
-        end if
-       ! P3 categories are consumed directly from state%scalars in the driver (column-local packing).
     case default
  end select mp_select
 
 !begin calculation of cloud microphysics tendencies:
-! For P3 these arrays hold the pre-microphysics state and are converted to
-! realized, full-step net tendencies in microphysics_to_MPAS.
  mp_tend_select: select case(trim(mp_scheme))
     case("mp_thompson","mp_thompson_aerosols","mp_p3","mp_wsm6")
        call mpas_pool_get_array(tend_physics,'rthmpten',rthmpten)
@@ -1095,14 +979,14 @@ enddo
                    enddo
                    enddo
                    if(f_nifa .and. f_nwfa) then
-                   call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
-                   call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
-                   do k = kts,kte
-                   do i = its,ite
-                      rnifampten(k,i) = nifa(k,i)
-                      rnwfampten(k,i) = nwfa(k,i)
-                   enddo
-                   enddo
+                      call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
+                      call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
+                      do k = kts,kte
+                      do i = its,ite
+                         rnifampten(k,i) = nifa(k,i)
+                         rnwfampten(k,i) = nwfa(k,i)
+                      enddo
+                      enddo
                    endif
 
                 case default
@@ -1156,31 +1040,13 @@ enddo
  integer,pointer:: mp_top_level
 
 !local variables:
-
- ! P3 log throttles (avoid multi-GB logs)
-  logical, save :: p3dbg_to_indices_checked = .false.
-
-! P3 debug / safety logging locals
- character(len=1024) :: dbgmsg
- integer :: nScalarTot_loc, nScalar1_loc, nScalar2_loc, nScalar3_loc
- logical :: p3_index_ok
  integer:: icount
- integer:: i,k,j,c
+ integer:: i,k,j
  real(kind=RKIND):: rho1,rho2,tem1,tem2
-
- ! --- P3 config ---
- integer, pointer :: p3_nCat
- logical, pointer :: p3_trplMomI, p3_liqfrac
- logical, pointer :: p3_debug_on
- ! --- P3 tracer base indices in scalars(:,:,:) ---
- integer, pointer :: index_p3_qit, index_p3_qni, index_p3_qir, index_p3_qib
- integer, pointer :: index_p3_qzi, index_p3_qli
 
 !-----------------------------------------------------------------------------------------------------------------
 
  call mpas_pool_get_config(configs,'config_microp_scheme',mp_scheme)
- call mpas_pool_get_config(configs,'config_p3_debug_on',p3_debug_on)
-
 
  call mpas_pool_get_array(mesh,'zz'   ,zz   )
  call mpas_pool_get_array(mesh,'zgrid',zgrid)
@@ -1208,20 +1074,6 @@ enddo
  qv   => scalars(index_qv,:,:)
  qc   => scalars(index_qc,:,:)
  qr   => scalars(index_qr,:,:)
-
-! P3DBG_TO: scalar dimension and basic index mapping (compute always; print once when debug enabled)
- nScalar1_loc = size(scalars,1)
- nScalar2_loc = size(scalars,2)
- nScalar3_loc = size(scalars,3)
- if (trim(mp_scheme) == 'mp_p3' .and. associated(p3_debug_on) .and. p3_debug_on .and. &
-     (.not. p3dbg_to_indices_checked)) then
-    write(dbgmsg,'(A,3I8)') 'P3DBG_TO: scalars dims(nScalar,nVert,nCells)=', &
-                            nScalar1_loc, nScalar2_loc, nScalar3_loc
-    call mpas_log_write(trim(dbgmsg))
-    write(dbgmsg,'(A,3I8)') 'P3DBG_TO: qv,qc,qr indices=', &
-                            index_qv, index_qc, index_qr
-    call mpas_log_write(trim(dbgmsg))
- end if
 
  call mpas_pool_get_array(tend,'rt_diabatic_tend',rt_diabatic_tend)
 
@@ -1386,151 +1238,74 @@ enddo
        end select mp2_select
 
     case("mp_p3")
+       !the P3 ice categories were written to scalars in driver_microphysics. qi, qs, qg and ni are not
+       !allocated with mp_p3: qi and ni point to the sums over the updated P3 ice categories, and qs and qg to
+       !zero, for the tendencies below; nothing is written to them:
+       call p3_sum_ice(state,scalars,its,ite)
+       qi => p3_qi_sum
+       qs => p3_zero_qsqg
+       qg => p3_zero_qsqg
+       ni => p3_ni_sum
 
-   call mpas_pool_get_config(configs,'config_p3_nCat'    ,p3_nCat    )
-   call mpas_pool_get_config(configs,'config_p3_trplMomI',p3_trplMomI)
-   call mpas_pool_get_config(configs,'config_p3_liqfrac' ,p3_liqfrac )
+       call mpas_pool_get_dimension(state,'index_nr',index_nr)
+       nr => scalars(index_nr,:,:)
 
-! Bulk hydrometeors + number concentrations (match MPAS bulk scalar layout)
-! qi, qs, qg and ni are not allocated with mp_p3 (the P3 categories were written to scalars in the driver):
-! qi and ni point to the updated sums over the P3 ice categories and qs and qg to zero, for the tendency
-! diagnostics below. Nothing is written to these fields.
-call p3_sum_ice(state,scalars,its,ite)
-qi => p3_qi_sum
-qs => p3_zero_qsqg
-qg => p3_zero_qsqg
-ni => p3_ni_sum
+       do j = jts,jte
+       do k = kts,kte
+       do i = its,ite
+          nr(k,i) = max(0._RKIND,nr_p(i,k,j))
+       enddo
+       enddo
+       enddo
 
-call mpas_pool_get_dimension(state,'index_nr',index_nr)
-nr => scalars(index_nr,:,:)
+       !nc is always predicted; nifa, nwfa, nifa2d and nwfa2d exist only with predicted aerosols (f_nifa and
+       !f_nwfa are then true):
+       call mpas_pool_get_dimension(state,'index_nc',index_nc)
+       nc => scalars(index_nc,:,:)
+       if(f_nifa .and. f_nwfa) then
+          call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
+          call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
+          nifa => scalars(index_nifa,:,:)
+          nwfa => scalars(index_nwfa,:,:)
+       endif
 
-do j = jts,jte
-do k = kts,kte
-do i = its,ite
-   nr(k,i) = max(0._RKIND, nr_p(i,k,j))
-end do
-end do
-end do
+       call mpas_pool_get_array(diag_physics,'nifa2d'  ,nifa2d  )
+       call mpas_pool_get_array(diag_physics,'nwfa2d'  ,nwfa2d  )
+       call mpas_pool_get_array(diag_physics,'rainprod',rainprod)
+       call mpas_pool_get_array(diag_physics,'evapprod',evapprod)
+       call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
+       call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
+       call mpas_pool_get_array(diag_physics,'re_snow' ,re_snow )
 
+       do j = jts,jte
+          if(f_nifa .and. f_nwfa) then
+             do i = its,ite
+                nifa2d(i) = nifa2d_p(i,j)
+                nwfa2d(i) = nwfa2d_p(i,j)
+             enddo
+             do k = kts,kte
+             do i = its,ite
+                nifa(k,i) = nifa_p(i,k,j)
+                nwfa(k,i) = nwfa_p(i,k,j)
+             enddo
+             enddo
+          endif
+          do k = kts,kte
+          do i = its,ite
+             nc(k,i)       = nc_p(i,k,j)
+             rainprod(k,i) = rainprod_p(i,k,j)
+             evapprod(k,i) = evapprod_p(i,k,j)
+             re_cloud(k,i) = max(0._RKIND,recloud_p(i,k,j))
+             re_ice(k,i)   = max(0._RKIND,reice_p(i,k,j))
+             re_snow(k,i)  = max(0._RKIND,resnow_p(i,k,j))
+          enddo
+          enddo
+       enddo
 
-
-! Aerosol-aware outputs/diagnostics (reuse MPAS aerosol-aware aerosol-aware tracers/diagnostics).
-! nwfa/nifa (and nwfa2d/nifa2d) exist only with predicted aerosols (f_nifa and f_nwfa true):
-call mpas_pool_get_dimension(state,'index_nc'  ,index_nc  )
-nc   => scalars(index_nc,:,:)
-if (f_nifa .and. f_nwfa) then
-   call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
-   call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
-   nifa => scalars(index_nifa,:,:)
-   nwfa => scalars(index_nwfa,:,:)
-end if
-
-call mpas_pool_get_array(diag_physics,'nifa2d'  ,nifa2d  )
-call mpas_pool_get_array(diag_physics,'nwfa2d'  ,nwfa2d  )
-call mpas_pool_get_array(diag_physics,'rainprod',rainprod)
-call mpas_pool_get_array(diag_physics,'evapprod',evapprod)
-call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
-call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
-call mpas_pool_get_array(diag_physics,'re_snow' ,re_snow )
-
-do j = jts,jte
-if (f_nifa .and. f_nwfa) then
-   do i = its,ite
-      nifa2d(i) = nifa2d_p(i,j)
-      nwfa2d(i) = nwfa2d_p(i,j)
-   enddo
-   do k = kts,kte
-   do i = its,ite
-      nifa(k,i)    = nifa_p(i,k,j)
-      nwfa(k,i)    = nwfa_p(i,k,j)
-   enddo
-   enddo
-end if
-do k = kts,kte
-do i = its,ite
-   nc(k,i)      = nc_p(i,k,j)
-   rainprod(k,i)= rainprod_p(i,k,j)
-   evapprod(k,i)= evapprod_p(i,k,j)
-
-   ! Keep radii physically non-negative to avoid downstream radiation errors
-   re_cloud(k,i)= max(0._RKIND, recloud_p(i,k,j))
-   re_ice(k,i)  = max(0._RKIND, reice_p(i,k,j))
-   re_snow(k,i) = max(0._RKIND, resnow_p(i,k,j))
-enddo
-enddo
-enddo
-
-   call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
-   call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
-   call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
-   call mpas_pool_get_dimension(state,'index_p3_qib',index_p3_qib)
-
-   if (p3_trplMomI) then
-      call mpas_pool_get_dimension(state,'index_p3_qzi',index_p3_qzi)
-   end if
-   if (p3_liqfrac) then
-      call mpas_pool_get_dimension(state,'index_p3_qli',index_p3_qli)
-   end if
-
-   ! P3DBG_TO: map and range-check P3 scalar indices against total scalar count (print/check once)
-   if (.not. p3dbg_to_indices_checked) then
-      nScalarTot_loc = nScalar1_loc
-      if (associated(p3_debug_on) .and. p3_debug_on) then
-         write(dbgmsg,'(A,4I8)') 'P3DBG_TO: index_p3_qit,qni,qir,qib=', &
-                                index_p3_qit, index_p3_qni, index_p3_qir, index_p3_qib
-         call mpas_log_write(trim(dbgmsg))
-         if (p3_trplMomI) then
-            write(dbgmsg,'(A,I8)') 'P3DBG_TO: index_p3_qzi=', index_p3_qzi
-            call mpas_log_write(trim(dbgmsg))
-         end if
-         if (p3_liqfrac) then
-            write(dbgmsg,'(A,I8)') 'P3DBG_TO: index_p3_qli=', index_p3_qli
-            call mpas_log_write(trim(dbgmsg))
-         end if
-      end if
-
-      p3_index_ok = .true.
-      if (index_p3_qit < 1 .or. index_p3_qit > nScalarTot_loc) p3_index_ok = .false.
-      if (index_p3_qni < 1 .or. index_p3_qni > nScalarTot_loc) p3_index_ok = .false.
-      if (index_p3_qir < 1 .or. index_p3_qir > nScalarTot_loc) p3_index_ok = .false.
-      if (index_p3_qib < 1 .or. index_p3_qib > nScalarTot_loc) p3_index_ok = .false.
-      if (p3_trplMomI) then
-         if (index_p3_qzi < 1 .or. index_p3_qzi > nScalarTot_loc) p3_index_ok = .false.
-      end if
-      if (p3_liqfrac) then
-         if (index_p3_qli < 1 .or. index_p3_qli > nScalarTot_loc) p3_index_ok = .false.
-      end if
-
-      ! Also validate that each P3 category block (base .. base+p3_nCat-1) fits in scalars(:,:,:)
-      if (index_p3_qit + p3_nCat - 1 > nScalarTot_loc) p3_index_ok = .false.
-      if (index_p3_qni + p3_nCat - 1 > nScalarTot_loc) p3_index_ok = .false.
-      if (index_p3_qir + p3_nCat - 1 > nScalarTot_loc) p3_index_ok = .false.
-      if (index_p3_qib + p3_nCat - 1 > nScalarTot_loc) p3_index_ok = .false.
-      if (p3_trplMomI) then
-         if (index_p3_qzi + p3_nCat - 1 > nScalarTot_loc) p3_index_ok = .false.
-      end if
-      if (p3_liqfrac) then
-         if (index_p3_qli + p3_nCat - 1 > nScalarTot_loc) p3_index_ok = .false.
-      end if
-
-      if (p3_index_ok) then
-         if (associated(p3_debug_on) .and. p3_debug_on) then
-            write(dbgmsg,'(A,I8)') 'P3DBG_TO: P3 scalar indices in-range; nScalarTot=', nScalarTot_loc
-            call mpas_log_write(trim(dbgmsg))
-         end if
-      else
-         write(dbgmsg,'(A,I8)') 'P3DBG_TO: ERROR P3 scalar index out-of-range; nScalarTot=', nScalarTot_loc
-         call mpas_log_write(trim(dbgmsg))
-         stop 1
-      end if
-      p3dbg_to_indices_checked = .true.
-   end if
-   ! P3 categories are written back directly to state%scalars in the driver (MPAS-compatible; no 4-D intermediates).
     case default
  end select mp_select
 
 !end calculation of cloud microphysics tendencies:
-! P3 now follows the same before/after differencing contract as Thompson.
  mp_tend_select: select case(trim(mp_scheme))
     case("mp_thompson","mp_thompson_aerosols","mp_p3","mp_wsm6")
        call mpas_pool_get_array(tend_physics,'rthmpten',rthmpten)
@@ -1591,14 +1366,14 @@ enddo
                    enddo
                    enddo
                    if(f_nifa .and. f_nwfa) then
-                   call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
-                   call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
-                   do k = kts,kte
-                   do i = its,ite
-                      rnifampten(k,i) = (nifa(k,i)-rnifampten(k,i))/dt_dyn
-                      rnwfampten(k,i) = (nwfa(k,i)-rnwfampten(k,i))/dt_dyn
-                   enddo
-                   enddo
+                      call mpas_pool_get_array(tend_physics,'rnifampten',rnifampten)
+                      call mpas_pool_get_array(tend_physics,'rnwfampten',rnwfampten)
+                      do k = kts,kte
+                      do i = its,ite
+                         rnifampten(k,i) = (nifa(k,i)-rnifampten(k,i))/dt_dyn
+                         rnwfampten(k,i) = (nwfa(k,i)-rnwfampten(k,i))/dt_dyn
+                      enddo
+                      enddo
                    endif
 
                 case default

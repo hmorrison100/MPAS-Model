@@ -34,14 +34,15 @@
 
 !local variables:
  character(len=StrKIND),pointer:: config_microp_scheme
- integer,pointer:: config_p3_nCat
  character(len=StrKIND),pointer:: config_convection_scheme
  character(len=StrKIND),pointer:: config_pbl_scheme
  character(len=StrKIND),pointer:: config_lsm_scheme
- logical,pointer:: mp_kessler_in,mp_thompson_in,mp_thompson_aers_in,mp_p3_in,mp_p3_cat2_in,mp_p3_cat3_in,mp_wsm6_in
+ logical,pointer:: mp_kessler_in,mp_thompson_in,mp_thompson_aers_in,mp_wsm6_in
  logical,pointer:: cu_grell_freitas_in,cu_kain_fritsch_in,cu_ntiedtke_in
  logical,pointer:: bl_mynn_in,bl_ysu_in
+ integer,pointer:: config_p3_nCat
  logical,pointer:: config_p3_trplMomI,config_p3_liqfrac,config_p3_aerosols,config_p3_ic_bulk_ice
+ logical,pointer:: mp_p3_in,mp_p3_cat2_in,mp_p3_cat3_in
  logical,pointer:: mp_p3_3mom_in,mp_p3_3mom_cat2_in,mp_p3_3mom_cat3_in
  logical,pointer:: mp_p3_lf_in,mp_p3_lf_cat2_in,mp_p3_lf_cat3_in,mp_p3_pbl_in,mp_p3_aers_in,mp_p3_icice_in
  logical,pointer:: bl_ysu_nop3_in,bl_mynn_nop3_in,cu_ntiedtke_nop3_in
@@ -74,7 +75,6 @@
  nullify(mp_thompson_aers_in)
  call mpas_pool_get_package(packages,'mp_thompson_aers_inActive',mp_thompson_aers_in)
 
-
  nullify(mp_p3_in)
  call mpas_pool_get_package(packages,'mp_p3_inActive',mp_p3_in)
 
@@ -87,13 +87,13 @@
  nullify(mp_wsm6_in)
  call mpas_pool_get_package(packages,'mp_wsm6_inActive',mp_wsm6_in)
 
- if (.not.associated(mp_kessler_in     ) .or. &
-    .not.associated(mp_thompson_in    ) .or. &
+ if(.not.associated(mp_kessler_in      )  .or. &
+    .not.associated(mp_thompson_in     ) .or. &
     .not.associated(mp_thompson_aers_in) .or. &
-    .not.associated(mp_p3_in     ) .or. &
-    .not.associated(mp_p3_cat2_in) .or. &
-    .not.associated(mp_p3_cat3_in) .or. &
-    .not.associated(mp_wsm6_in        )) then
+    .not.associated(mp_p3_in           ) .or. &
+    .not.associated(mp_p3_cat2_in      ) .or. &
+    .not.associated(mp_p3_cat3_in      ) .or. &
+    .not.associated(mp_wsm6_in)) then
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
     call mpas_log_write('* Error while setting up packages for cloud microphysics options in atmosphere core.',messageType=MPAS_LOG_ERR)
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
@@ -104,9 +104,9 @@
  mp_kessler_in       = .false.
  mp_thompson_in      = .false.
  mp_thompson_aers_in = .false.
- mp_p3_in       = .false.
- mp_p3_cat2_in  = .false.
- mp_p3_cat3_in  = .false.
+ mp_p3_in            = .false.
+ mp_p3_cat2_in       = .false.
+ mp_p3_cat3_in       = .false.
  mp_wsm6_in          = .false.
 
  if(config_microp_scheme == 'mp_kessler') then
@@ -116,23 +116,23 @@
  elseif(config_microp_scheme == 'mp_thompson_aerosols') then
     mp_thompson_aers_in = .true.
  elseif(config_microp_scheme == 'mp_p3') then
-    if (.not.associated(config_p3_nCat)) then
+    if(.not.associated(config_p3_nCat)) then
        call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
        call mpas_log_write('* Error: config_p3_nCat is required for mp_p3 package setup.',messageType=MPAS_LOG_ERR)
        call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
        ierr = 1
        return
-    end if
-    if (config_p3_nCat < 1 .or. config_p3_nCat > 3) then
+    endif
+    if(config_p3_nCat < 1 .or. config_p3_nCat > 3) then
        call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
        call mpas_log_write('* Error: config_p3_nCat must be 1, 2, or 3 for mp_p3.',messageType=MPAS_LOG_ERR)
        call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
        ierr = 1
        return
-    end if
+    endif
     mp_p3_in = .true.
-    if (config_p3_nCat >= 2) mp_p3_cat2_in = .true.
-    if (config_p3_nCat >= 3) mp_p3_cat3_in = .true.
+    if(config_p3_nCat >= 2) mp_p3_cat2_in = .true.
+    if(config_p3_nCat >= 3) mp_p3_cat3_in = .true.
  elseif(config_microp_scheme == 'mp_wsm6') then
     mp_wsm6_in = .true.
  endif
@@ -140,9 +140,9 @@
  call mpas_log_write('    mp_kessler_in           = $l', logicArgs=(/mp_kessler_in/))
  call mpas_log_write('    mp_thompson_in          = $l', logicArgs=(/mp_thompson_in/))
  call mpas_log_write('    mp_thompson_aers_in     = $l', logicArgs=(/mp_thompson_aers_in/))
- call mpas_log_write('    mp_p3_in          = $l', logicArgs=(/mp_p3_in/))
- call mpas_log_write('    mp_p3_cat2_in     = $l', logicArgs=(/mp_p3_cat2_in/))
- call mpas_log_write('    mp_p3_cat3_in     = $l', logicArgs=(/mp_p3_cat3_in/))
+ call mpas_log_write('    mp_p3_in                = $l', logicArgs=(/mp_p3_in/))
+ call mpas_log_write('    mp_p3_cat2_in           = $l', logicArgs=(/mp_p3_cat2_in/))
+ call mpas_log_write('    mp_p3_cat3_in           = $l', logicArgs=(/mp_p3_cat3_in/))
  call mpas_log_write('    mp_wsm6_in              = $l', logicArgs=(/mp_wsm6_in/))
 
 !--- initialization of all packages for parameterizations of convection:
@@ -217,12 +217,12 @@
  call mpas_log_write('    bl_ysu_in               = $l', logicArgs=(/bl_ysu_in/))
  call mpas_log_write('')
 
-!--- P3 optional prognostic scalars. Registry packages are OR-lists, so each (option, category)
-!    combination has its own package. The *_nop3_in packages are the PBL and convection packages
-!    restricted to non-P3 microphysics: the bulk qi, qs and ni scalars they require are not allocated
-!    with P3, which predicts its own ice categories (p3_* scalars). mp_p3_icice_in allocates the
-!    bulk qi, qs and qg scalars with P3, only so that the ice of the initial conditions is read and
-!    converted to P3 ice (config_p3_ic_bulk_ice). These are set after the PBL and convection packages.
+!--- initialization of the packages for the optional P3 prognostic scalars. Registry packages are OR-lists, so that
+!    each (option, category) combination has its own package. The *_nop3_in packages are the PBL and convection
+!    packages restricted to microphysics schemes other than P3: the bulk qi, qs and ni scalars they require are not
+!    allocated with P3, which predicts its own ice categories (p3_* scalars). mp_p3_icice_in allocates the bulk qi,
+!    qs and qg scalars with P3, only so that the ice of the initial conditions is read and converted to P3 ice
+!    (config_p3_ic_bulk_ice). These packages are set after the PBL and convection packages.
 
  nullify(config_p3_trplMomI)
  call mpas_pool_get_config(configs,'config_p3_trplMomI',config_p3_trplMomI)
@@ -258,16 +258,16 @@
  nullify(cu_ntiedtke_nop3_in)
  call mpas_pool_get_package(packages,'cu_ntiedtke_nop3_inActive',cu_ntiedtke_nop3_in)
 
- if(.not.associated(config_p3_trplMomI) .or. .not.associated(config_p3_liqfrac) .or. &
-    .not.associated(config_p3_aerosols) .or. .not.associated(mp_p3_aers_in) .or.        &
-    .not.associated(config_p3_ic_bulk_ice) .or. .not.associated(mp_p3_icice_in) .or. &
-    .not.associated(mp_p3_3mom_in) .or. .not.associated(mp_p3_3mom_cat2_in) .or.   &
-    .not.associated(mp_p3_3mom_cat3_in) .or. .not.associated(mp_p3_lf_in) .or.      &
-    .not.associated(mp_p3_lf_cat2_in) .or. .not.associated(mp_p3_lf_cat3_in) .or.   &
-    .not.associated(mp_p3_pbl_in) .or. .not.associated(bl_ysu_nop3_in) .or.         &
-    .not.associated(bl_mynn_nop3_in) .or. .not.associated(cu_ntiedtke_nop3_in)) then
+ if(.not.associated(config_p3_trplMomI   ) .or. .not.associated(config_p3_liqfrac  ) .or. &
+    .not.associated(config_p3_aerosols   ) .or. .not.associated(mp_p3_aers_in      ) .or. &
+    .not.associated(config_p3_ic_bulk_ice) .or. .not.associated(mp_p3_icice_in     ) .or. &
+    .not.associated(mp_p3_3mom_in        ) .or. .not.associated(mp_p3_3mom_cat2_in ) .or. &
+    .not.associated(mp_p3_3mom_cat3_in   ) .or. .not.associated(mp_p3_lf_in        ) .or. &
+    .not.associated(mp_p3_lf_cat2_in     ) .or. .not.associated(mp_p3_lf_cat3_in   ) .or. &
+    .not.associated(mp_p3_pbl_in         ) .or. .not.associated(bl_ysu_nop3_in     ) .or. &
+    .not.associated(bl_mynn_nop3_in      ) .or. .not.associated(cu_ntiedtke_nop3_in)) then
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
-    call mpas_log_write('* Error while setting up packages for P3 optional prognostic scalars.',                 messageType=MPAS_LOG_ERR)
+    call mpas_log_write('* Error while setting up packages for P3 optional prognostic scalars.',messageType=MPAS_LOG_ERR)
     call mpas_log_write('====================================================================================',messageType=MPAS_LOG_ERR)
     ierr = 1
     return
@@ -281,22 +281,22 @@
  mp_p3_lf_cat3_in   = mp_p3_cat3_in .and. config_p3_liqfrac
  mp_p3_pbl_in       = mp_p3_in      .and. (bl_ysu_in .or. bl_mynn_in)
  mp_p3_aers_in      = mp_p3_in      .and. config_p3_aerosols
- mp_p3_icice_in = mp_p3_in    .and. config_p3_ic_bulk_ice
+ mp_p3_icice_in     = mp_p3_in      .and. config_p3_ic_bulk_ice
 
  bl_ysu_nop3_in      = bl_ysu_in      .and. .not. mp_p3_in
  bl_mynn_nop3_in     = bl_mynn_in     .and. .not. mp_p3_in
  cu_ntiedtke_nop3_in = cu_ntiedtke_in .and. .not. mp_p3_in
 
  if(mp_p3_in) then
-    call mpas_log_write('    mp_p3_3mom_in     = $l', logicArgs=(/mp_p3_3mom_in/))
-    call mpas_log_write('    mp_p3_3mom_cat2_in= $l', logicArgs=(/mp_p3_3mom_cat2_in/))
-    call mpas_log_write('    mp_p3_3mom_cat3_in= $l', logicArgs=(/mp_p3_3mom_cat3_in/))
-    call mpas_log_write('    mp_p3_lf_in       = $l', logicArgs=(/mp_p3_lf_in/))
-    call mpas_log_write('    mp_p3_lf_cat2_in  = $l', logicArgs=(/mp_p3_lf_cat2_in/))
-    call mpas_log_write('    mp_p3_lf_cat3_in  = $l', logicArgs=(/mp_p3_lf_cat3_in/))
-    call mpas_log_write('    mp_p3_pbl_in      = $l', logicArgs=(/mp_p3_pbl_in/))
-    call mpas_log_write('    mp_p3_aers_in     = $l', logicArgs=(/mp_p3_aers_in/))
-    call mpas_log_write('    mp_p3_icice_in = $l', logicArgs=(/mp_p3_icice_in/))
+    call mpas_log_write('    mp_p3_3mom_in           = $l', logicArgs=(/mp_p3_3mom_in/))
+    call mpas_log_write('    mp_p3_3mom_cat2_in      = $l', logicArgs=(/mp_p3_3mom_cat2_in/))
+    call mpas_log_write('    mp_p3_3mom_cat3_in      = $l', logicArgs=(/mp_p3_3mom_cat3_in/))
+    call mpas_log_write('    mp_p3_lf_in             = $l', logicArgs=(/mp_p3_lf_in/))
+    call mpas_log_write('    mp_p3_lf_cat2_in        = $l', logicArgs=(/mp_p3_lf_cat2_in/))
+    call mpas_log_write('    mp_p3_lf_cat3_in        = $l', logicArgs=(/mp_p3_lf_cat3_in/))
+    call mpas_log_write('    mp_p3_pbl_in            = $l', logicArgs=(/mp_p3_pbl_in/))
+    call mpas_log_write('    mp_p3_aers_in           = $l', logicArgs=(/mp_p3_aers_in/))
+    call mpas_log_write('    mp_p3_icice_in          = $l', logicArgs=(/mp_p3_icice_in/))
     call mpas_log_write('')
  endif
 

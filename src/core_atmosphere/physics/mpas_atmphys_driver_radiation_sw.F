@@ -497,69 +497,62 @@
 
        microp_select: select case(microp_scheme)
           case("mp_p3")
+             if(config_microp_re) then
+                call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
+                call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
 
-                if (config_microp_re) then
+                !P3 ice goes through the RRTMG snow optics with the P3 effective radius (re_ice), bounded to
+                !10-130 microns. The ice mass was moved to the radiative snow (qsrad_p), once for both the short
+                !wave and long wave codes, in driver_cloudiness (p3_ice_to_radiative_snow), which also scales the
+                !mass by 130/re_ice for re_ice > 130 microns; the radiative cloud ice is zero.
+                has_reqc = 1
+                has_reqi = 1
+                has_reqs = 1
 
-                   call mpas_pool_get_array(diag_physics, 're_cloud', re_cloud)
-                   call mpas_pool_get_array(diag_physics, 're_ice',   re_ice)
+                do j = jts,jte
+                do k = kts,kte
+                do i = its,ite
+                   if(re_cloud(k,i) > 0._RKIND .and. re_cloud(k,i) < 1.0e-2_RKIND) then
+                      recloud_p(i,k,j) = max(2.5e-6_RKIND,re_cloud(k,i))
+                   else
+                      recloud_p(i,k,j) = 2.5e-6_RKIND
+                   endif
+                   if(recloud_p(i,k,j) <= 2.5e-6_RKIND .and. cldfrac_p(i,k,j) > 0._RKIND) then
+                      if((xland_p(i,j) - 1.5_RKIND) > 0._RKIND) then
+                         recloud_p(i,k,j) = 10.5e-6_RKIND
+                      elseif((xland_p(i,j) - 1.5_RKIND) < 0._RKIND) then
+                         recloud_p(i,k,j) = 7.5e-6_RKIND
+                      endif
+                   endif
 
-                   ! P3 ice goes through the RRTMG snow optics with the P3 effective radius (re_ice), bounded to
-                   ! 10-130 microns. The ice mass was moved to the radiative snow (qsrad_p), once for both the
-                   ! short wave and long wave codes, in driver_cloudiness (p3_ice_to_radiative_snow), which also
-                   ! scales the mass by 130/re_ice for re_ice > 130 microns; the radiative cloud ice is zero.
-                   has_reqc = 1
-                   has_reqi = 1
-                   has_reqs = 1
+                   if(re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
+                      rei_native = re_ice(k,i)
+                   else
+                      rei_native = 25.0e-6_RKIND
+                   endif
+                   rei_um = rei_native * 1.0e6_RKIND
 
-                   do j = jts, jte
-                      do k = kts, kte
-                         do i = its, ite
+                   if(rei_um > 130.0_RKIND) then
+                      resnow_p(i,k,j) = 130.0e-6_RKIND
+                   else
+                      resnow_p(i,k,j) = max(10.0e-6_RKIND,rei_native)
+                   endif
 
-                            if (re_cloud(k,i) > 0._RKIND .and. re_cloud(k,i) < 1.0e-2_RKIND) then
-                               recloud_p(i,k,j) = max(2.5e-6_RKIND, re_cloud(k,i))
-                            else
-                               recloud_p(i,k,j) = 2.5e-6_RKIND
-                            end if
-                            if (recloud_p(i,k,j) <= 2.5e-6_RKIND .and. cldfrac_p(i,k,j) > 0._RKIND) then
-                               if ((xland_p(i,j) - 1.5_RKIND) > 0._RKIND) then
-                                  recloud_p(i,k,j) = 10.5e-6_RKIND
-                               else if ((xland_p(i,j) - 1.5_RKIND) < 0._RKIND) then
-                                  recloud_p(i,k,j) = 7.5e-6_RKIND
-                               end if
-                            end if
-
-                            if (re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
-                               rei_native = re_ice(k,i)
-                            else
-                               rei_native = 25.0e-6_RKIND
-                            end if
-                            rei_um = rei_native * 1.0e6_RKIND
-
-                            if (rei_um > 130.0_RKIND) then
-                               resnow_p(i,k,j) = 130.0e-6_RKIND
-                            else
-                               resnow_p(i,k,j) = max(10.0e-6_RKIND, rei_native)
-                            end if
-
-                            reice_p(i,k,j) = 10.0e-6_RKIND
-
-                         end do
-                      end do
-                   end do
-
-                else
-
-                   do j = jts, jte
-                      do k = kts, kte
-                         do i = its, ite
-                            recloud_p(i,k,j) = 0._RKIND
-                            reice_p(i,k,j)   = 0._RKIND
-                            resnow_p(i,k,j)  = 0._RKIND
-                         end do
-                      end do
-                   end do
-
-                end if
+                   reice_p(i,k,j) = 10.0e-6_RKIND
+                enddo
+                enddo
+                enddo
+             else
+                do j = jts,jte
+                do k = kts,kte
+                do i = its,ite
+                   recloud_p(i,k,j) = 0._RKIND
+                   reice_p(i,k,j)   = 0._RKIND
+                   resnow_p(i,k,j)  = 0._RKIND
+                enddo
+                enddo
+                enddo
+             endif
 
           case("mp_thompson","mp_thompson_aerosols","mp_wsm6")
              if(config_microp_re) then
@@ -650,64 +643,62 @@
                                         )
 
           case("mp_p3")
-             !--- P3: aerosol direct effect computed exactly as for mp_thompson_aerosols, from the
-             !    prognostic water- and ice-friendly aerosols (nwfa, nifa), when P3 runs aerosol-aware.
-             !    With config_p3_aerosols = .false., aer_opt stays 0 (no aerosol), as for mp_thompson.
+             !--- aerosol direct effect as for mp_thompson_aerosols, from the predicted water- and ice-friendly
+             !    aerosols (nwfa, nifa). With config_p3_aerosols = .false., aer_opt stays 0 (no aerosol), as for
+             !    mp_thompson.
              call mpas_pool_get_config(configs,'config_p3_aerosols',config_p3_aerosols)
              if(config_p3_aerosols) then
+                call mpas_pool_get_array(mesh,'zgrid',zgrid)
+                call mpas_pool_get_array(diag_physics,'taod5502d',taod5502d)
+                call mpas_pool_get_array(diag_physics,'taod5503d',taod5503d)
 
-             call mpas_pool_get_array(mesh,'zgrid',zgrid)
-             call mpas_pool_get_array(diag_physics,'taod5502d',taod5502d)
-             call mpas_pool_get_array(diag_physics,'taod5503d',taod5503d)
-
-             aer_opt = 3
-             do j = jts,jte
-             do i = its,ite
-                ht_p(i,j) = zgrid(1,i)
-                if(xland_p(i,j)==1._RKIND) then
-                   taer_type_p(i,j) = 1
-                elseif(xland_p(i,j)==2._RKIND) then
-                   taer_type_p(i,j) = 3
-                endif
-             enddo
-             enddo
-
-             !--- calculation of the 550 nm optical depth of the water- and ice-friendly aerosols:
-             call gt_aod( &
-                     p_phy = pres_hyd_p , dz8w = dz_p   , t_phy     = t_p         , qvapor = qv_p , &
-                     nwfa  = nwfa_p     , nifa = nifa_p , taod5503d = taod5503d_p ,                 &
-                     ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme ,        &
-                     its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte          &
-                        )
-
-             do j = jts,jte
-             do i = its,ite
-                taod5502d_p(i,j) = 0._RKIND
-                do k = kts,kte
-                   taod5502d_p(i,j) = taod5502d_p(i,j) + taod5503d_p(i,k,j)
-                   taod5503d(k,i) = taod5503d_p(i,k,j)
+                aer_opt = 3
+                do j = jts,jte
+                do i = its,ite
+                   ht_p(i,j) = zgrid(1,i)
+                   if(xland_p(i,j)==1._RKIND) then
+                      taer_type_p(i,j) = 1
+                   elseif(xland_p(i,j)==2._RKIND) then
+                      taer_type_p(i,j) = 3
+                   endif
                 enddo
-                taod5502d(i) = taod5502d_p(i,j)
-             enddo
-             enddo
+                enddo
 
-             !--- calculation of the spectral optical depth, single-scattering albedo, and asymmetry factor
-             !as a function of the 550 nm optical depth of the water- and ice-friendly aerosols:
-             call calc_aerosol_rrtmg_sw( &
-                               ht       = ht_p         , dz8w     = dz_p        , &
-                               p        = pres_hyd_p   , t3d      = t_p         , &
-                               qv3d     = qv_p         , tauaer   = tauaer_p    , &
-                               ssaaer   = ssaaer_p     , asyaer   = asyaer_p    , &
-                               aod5502d = taod5502d_p  , aod5503d = taod5503d_p , &
-                               aer_type = taer_type_p  ,                                               &
-                               aer_aod550_opt = taer_aod550_opt , aer_angexp_opt = taer_angexp_opt   , &
-                               aer_ssa_opt    = taer_ssa_opt    , aer_asy_opt    = taer_asy_opt      , &
-                               aer_aod550_val = aer_aod550_val  , aer_angexp_val = aer_angexp_val    , &
-                               aer_ssa_val    = aer_ssa_val     , aer_asy_val    = aer_asy_val       , &
-                               ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme , &
-                               its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte   &
-                                        )
+                !--- calculation of the 550 nm optical depth of the water- and ice-friendly aerosols:
+                call gt_aod( &
+                        p_phy = pres_hyd_p , dz8w = dz_p   , t_phy     = t_p         , qvapor = qv_p , &
+                        nwfa  = nwfa_p     , nifa = nifa_p , taod5503d = taod5503d_p ,                 &
+                        ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme ,        &
+                        its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte          &
+                           )
 
+                do j = jts,jte
+                do i = its,ite
+                   taod5502d_p(i,j) = 0._RKIND
+                   do k = kts,kte
+                      taod5502d_p(i,j) = taod5502d_p(i,j) + taod5503d_p(i,k,j)
+                      taod5503d(k,i) = taod5503d_p(i,k,j)
+                   enddo
+                   taod5502d(i) = taod5502d_p(i,j)
+                enddo
+                enddo
+
+                !--- calculation of the spectral optical depth, single-scattering albedo, and asymmetry factor
+                !as a function of the 550 nm optical depth of the water- and ice-friendly aerosols:
+                call calc_aerosol_rrtmg_sw( &
+                                  ht       = ht_p         , dz8w     = dz_p        , &
+                                  p        = pres_hyd_p   , t3d      = t_p         , &
+                                  qv3d     = qv_p         , tauaer   = tauaer_p    , &
+                                  ssaaer   = ssaaer_p     , asyaer   = asyaer_p    , &
+                                  aod5502d = taod5502d_p  , aod5503d = taod5503d_p , &
+                                  aer_type = taer_type_p  ,                                               &
+                                  aer_aod550_opt = taer_aod550_opt , aer_angexp_opt = taer_angexp_opt   , &
+                                  aer_ssa_opt    = taer_ssa_opt    , aer_asy_opt    = taer_asy_opt      , &
+                                  aer_aod550_val = aer_aod550_val  , aer_angexp_val = aer_angexp_val    , &
+                                  aer_ssa_val    = aer_ssa_val     , aer_asy_val    = aer_asy_val       , &
+                                  ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme , &
+                                  its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte   &
+                                           )
              endif
 
           case default

@@ -416,50 +416,50 @@
        microp_select: select case(microp_scheme)
           case("mp_p3")
              if(config_microp_re) then
-                   call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
-                   call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
+                call mpas_pool_get_array(diag_physics,'re_cloud',re_cloud)
+                call mpas_pool_get_array(diag_physics,'re_ice'  ,re_ice  )
 
-                   ! P3 ice goes through the RRTMG snow optics with the P3 effective radius (re_ice), bounded to
-                   ! 10-130 microns. The ice mass was moved to the radiative snow (qsrad_p), once for both the
-                   ! short wave and long wave codes, in driver_cloudiness (p3_ice_to_radiative_snow), which also
-                   ! scales the mass by 130/re_ice for re_ice > 130 microns; the radiative cloud ice is zero.
-                   has_reqc = 1
-                   has_reqi = 1
-                   has_reqs = 1
+                !P3 ice goes through the RRTMG snow optics with the P3 effective radius (re_ice), bounded to
+                !10-130 microns. The ice mass was moved to the radiative snow (qsrad_p), once for both the short
+                !wave and long wave codes, in driver_cloudiness (p3_ice_to_radiative_snow), which also scales the
+                !mass by 130/re_ice for re_ice > 130 microns; the radiative cloud ice is zero.
+                has_reqc = 1
+                has_reqi = 1
+                has_reqs = 1
 
-                   do j = jts,jte
-                   do k = kts,kte
-                   do i = its,ite
-                      if (re_cloud(k,i) > 0._RKIND .and. re_cloud(k,i) < 1.0e-2_RKIND) then
-                         recloud_p(i,k,j) = max(2.5e-6_RKIND, re_cloud(k,i))
-                      else
-                         recloud_p(i,k,j) = 2.5e-6_RKIND
-                      end if
-                      if (recloud_p(i,k,j) <= 2.5e-6_RKIND .and. cldfrac_p(i,k,j) > 0._RKIND) then
-                         if ((xland_p(i,j) - 1.5_RKIND) > 0._RKIND) then
-                            recloud_p(i,k,j) = 10.5e-6_RKIND
-                         else if ((xland_p(i,j) - 1.5_RKIND) < 0._RKIND) then
-                            recloud_p(i,k,j) = 7.5e-6_RKIND
-                         end if
-                      end if
+                do j = jts,jte
+                do k = kts,kte
+                do i = its,ite
+                   if(re_cloud(k,i) > 0._RKIND .and. re_cloud(k,i) < 1.0e-2_RKIND) then
+                      recloud_p(i,k,j) = max(2.5e-6_RKIND,re_cloud(k,i))
+                   else
+                      recloud_p(i,k,j) = 2.5e-6_RKIND
+                   endif
+                   if(recloud_p(i,k,j) <= 2.5e-6_RKIND .and. cldfrac_p(i,k,j) > 0._RKIND) then
+                      if((xland_p(i,j) - 1.5_RKIND) > 0._RKIND) then
+                         recloud_p(i,k,j) = 10.5e-6_RKIND
+                      elseif((xland_p(i,j) - 1.5_RKIND) < 0._RKIND) then
+                         recloud_p(i,k,j) = 7.5e-6_RKIND
+                      endif
+                   endif
 
-                      if (re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
-                         rei_native = re_ice(k,i)
-                      else
-                         rei_native = 25.0e-6_RKIND
-                      end if
-                      rei_um = rei_native * 1.0e6_RKIND
+                   if(re_ice(k,i) > 0._RKIND .and. re_ice(k,i) < 1.0e-2_RKIND) then
+                      rei_native = re_ice(k,i)
+                   else
+                      rei_native = 25.0e-6_RKIND
+                   endif
+                   rei_um = rei_native * 1.0e6_RKIND
 
-                      if (rei_um > 130.0_RKIND) then
-                         resnow_p(i,k,j) = 130.0e-6_RKIND
-                      else
-                         resnow_p(i,k,j) = max(10.0e-6_RKIND, rei_native)
-                      end if
+                   if(rei_um > 130.0_RKIND) then
+                      resnow_p(i,k,j) = 130.0e-6_RKIND
+                   else
+                      resnow_p(i,k,j) = max(10.0e-6_RKIND,rei_native)
+                   endif
 
-                      reice_p(i,k,j) = 10.0e-6_RKIND
-                   enddo
-                   enddo
-                   enddo
+                   reice_p(i,k,j) = 10.0e-6_RKIND
+                enddo
+                enddo
+                enddo
              else
                 do j = jts,jte
                 do k = kts,kte
@@ -480,9 +480,6 @@
              enddo
              enddo
              enddo
-
-
-
 
           case("mp_thompson","mp_thompson_aerosols","mp_wsm6")
              if(config_microp_re) then
@@ -789,7 +786,7 @@
                 do j = jts,jte
                 do k = kts,kte
                 do i = its,ite
-                   ! For P3, fall back to 1/re* if RRTMG_LW does not return rre*.
+                   !1/re if RRTMG_LW does not return rre:
                    if(rrecloud_p(i,k,j) .gt. 0._RKIND) then
                       rre_cloud(k,i) = rrecloud_p(i,k,j)
                    else if(recloud_p(i,k,j) .gt. 0._RKIND) then

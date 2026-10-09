@@ -2578,87 +2578,106 @@
                      description="configuration for cloud microphysics schemes"
                      possible_values="`suite',`mp_wsm6',`mp_thompson',`mp_thompson_aerosols', `mp_kessler',`mp_p3',`off'"/>
 
-
-                <!-- ===================== P3 microphysics (WRF P3 option parity) ===================== -->
+                <!-- P3 cloud microphysics (config_microp_scheme = mp_p3) -->
                 <nml_option name="config_p3_nCat" type="integer" default_value="1" in_defaults="false"
                      units="-"
-                     description="P3 number of ice categories (valid: 1-3)"/>
+                     description="number of free ice categories of the P3 cloud microphysics"
+                     possible_values="1, 2 or 3"/>
 
                 <nml_option name="config_p3_trplMomI" type="logical" default_value="false" in_defaults="false"
                      units="-"
-                     description="Enable P3 triple-moment ice (requires p3_qzi*)"/>
+                     description="triple-moment ice (P3): predicted sixth moment of each ice category (p3_qzi)"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_liqfrac" type="logical" default_value="false" in_defaults="false"
                      units="-"
-                     description="Enable P3 liquid fraction on ice (requires p3_qli*)"/>
+                     description="predicted liquid fraction of each ice category (P3, p3_qli)"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_predictNc" type="logical" default_value="true" in_defaults="false"
                      units="-"
-                     description="Predict cloud droplet number (2-moment cloud)"/>
+                     description="predicted cloud droplet number (double-moment cloud water) in P3"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_aerosols" type="logical" default_value="true" in_defaults="false"
                      units="-"
-                     description="Enable aerosol-aware P3 (predicted aerosols): the water- and ice-friendly aerosol numbers nwfa and nifa are allocated, advected and used by P3 (and by the RRTMG shortwave aerosol optics) only if true"/>
+                     description="predicted aerosols in P3: the water- and ice-friendly aerosol numbers nwfa and nifa are allocated, advected and used by P3 (and by the RRTMG short wave aerosol optics) only if true; requires config_p3_predictNc = true"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_abort_on_err" type="logical" default_value="true" in_defaults="false"
                      units="-"
-                     description="Abort if P3 returns non-zero status"/>
+                     description="abort if the initialization of P3 returns an error status"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_dowr" type="logical" default_value="false" in_defaults="false"
                      units="-"
-                     description="Print the P3 initialization messages (version, reading of the lookup tables, table-version warnings) to standard output; no effect on the physics"/>
+                     description="write additional P3 initialization messages to standard output (the P3 version and the lookup tables read are always written to the log file); no effect on the physics"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_autoAccr_param" type="integer" default_value="0" in_defaults="false"
                      units="-"
-                     description="P3 warm-rain autoconversion and accretion: 1 = Seifert and Beheng (2001), 2 = Khairoutdinov and Kogan (2000), 3 = Kogan (2013); 0 = P3 default (2); other values stop the model with an error"/>
+                     description="warm-rain autoconversion and accretion in P3: 1 = Seifert and Beheng (2001), 2 = Khairoutdinov and Kogan (2000), 3 = Kogan (2013), 0 = P3 default (2)"
+                     possible_values="0, 1, 2 or 3"/>
 
                 <nml_option name="config_p3_debug_on" type="logical" default_value="false" in_defaults="false"
                      units="-"
-                     description="Enable internal P3 debug checks"/>
+                     description="internal debug checks of P3"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_scpf_on" type="logical" default_value="false" in_defaults="false"
                      units="-"
-                     description="Enable SCPF adjustments"/>
+                     description="subgrid cloud and precipitation fractions in P3 (SCPF)"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_clbfact_dep" type="real" default_value="1.0" in_defaults="false"
                      units="-"
-                     description="Calibration factor for deposition"/>
+                     description="calibration factor for the ice deposition rate in P3"
+                     possible_values="Positive real values"/>
 
                 <nml_option name="config_p3_clbfact_sub" type="real" default_value="1.0" in_defaults="false"
                      units="-"
-                     description="Calibration factor for sublimation"/>
+                     description="calibration factor for the ice sublimation rate in P3"
+                     possible_values="Positive real values"/>
 
                 <nml_option name="config_p3_scpf_pfrac" type="real" default_value="0.0" in_defaults="false"
                      units="-"
-                     description="SCPF precipitation fraction factor"/>
+                     description="precipitation fraction factor of the P3 SCPF (config_p3_scpf_on = true)"
+                     possible_values="Real values between 0 and 1"/>
 
                 <nml_option name="config_p3_scpf_resfact" type="real" default_value="0.0" in_defaults="false"
                      units="-"
-                     description="SCPF resolution factor"/>
+                     description="model resolution factor of the P3 SCPF (config_p3_scpf_on = true)"
+                     possible_values="Non-negative real values"/>
 
                 <nml_option name="config_p3_freq3Ddiag" type="integer" default_value="0" in_defaults="false"
                      units="timesteps"
-                     description="Frequency (timesteps) for 3D diagnostics; 0 disables"/>
+                     description="frequency of the internal 3-d diagnostics of P3; 0 = none"
+                     possible_values="Non-negative integer values"/>
 
                 <nml_option name="config_p3_lookup_file_dir" type="character" default_value="." in_defaults="false"
                      units="-"
-                     description="Directory containing P3 lookup tables"/>
+                     description="directory containing the P3 lookup tables"
+                     possible_values="Path to a directory"/>
 
                 <nml_option name="config_p3_cu_ri" type="real" default_value="125.e-6" in_defaults="false"
                      units="m"
-                     description="Mean-volume radius of the ice particles detrained by the convection scheme, used for the P3 ice number tendency, the p3_qzi tendency (triple-moment ice) and the destination ice category (config_p3_nCat &gt; 1)"/>
+                     description="mean-volume radius of the ice particles detrained by the convection scheme, used for the P3 ice number tendency, the p3_qzi tendency (triple-moment ice) and the destination ice category (config_p3_nCat &gt; 1)"
+                     possible_values="Positive real values"/>
 
                 <nml_option name="config_p3_ic_bulk_ice" type="logical" default_value="false" in_defaults="false"
                      units="-"
-                     description="Convert the bulk ice (qi + qs + qg) of the initial conditions (data assimilation analysis, or a forecast with another microphysics scheme) to P3 ice at a cold start, as ice detrained by the convection scheme (config_p3_cu_ri). Needed only if the initial conditions contain bulk ice: qi, qs and qg are then allocated and advected (zero) for the whole run"/>
+                     description="convert the bulk ice (qi + qs + qg) of the initial conditions (data assimilation analysis, or a forecast with another microphysics scheme) to P3 ice at a cold start, as ice detrained by the convection scheme (config_p3_cu_ri). Needed only if the initial conditions contain bulk ice: qi, qs and qg are then allocated and advected (zero) for the whole run"
+                     possible_values=".true. or .false."/>
 
                 <nml_option name="config_p3_cu_rc" type="real" default_value="10.e-6" in_defaults="false"
                      units="m"
-                     description="Radius of the cloud droplets detrained by the convection scheme, used for the nc tendency (if config_p3_predictNc)"/>
+                     description="radius of the cloud droplets detrained by the convection scheme, used for the nc tendency (config_p3_predictNc = true)"
+                     possible_values="Positive real values"/>
 
                 <nml_option name="config_p3_cu_rr" type="real" default_value="0.25e-3" in_defaults="false"
                      units="m"
-                     description="Mean-volume radius of the rain drops detrained by the Kain-Fritsch convection scheme, used for the nr tendency"/>
+                     description="mean-volume radius of the rain drops detrained by the Kain-Fritsch convection scheme, used for the nr tendency"
+                     possible_values="Positive real values"/>
 
                 <nml_option name="config_convection_scheme" type="character" default_value="suite" in_defaults="false"
                      units="-"
