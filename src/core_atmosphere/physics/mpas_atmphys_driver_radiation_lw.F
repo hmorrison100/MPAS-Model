@@ -752,7 +752,7 @@
     case("rrtmg_lw")
 
        microp_select: select case(microp_scheme)
-          case("mp_thompson","mp_thompson_aerosols","mp_wsm6")
+          case("mp_thompson","mp_thompson_aerosols","mp_wsm6","mp_p3")
              call mpas_pool_get_array(diag_physics,'rre_cloud',rre_cloud)
              call mpas_pool_get_array(diag_physics,'rre_ice'  ,rre_ice  )
              call mpas_pool_get_array(diag_physics,'rre_snow' ,rre_snow )
@@ -763,53 +763,6 @@
                    rre_cloud(k,i) = rrecloud_p(i,k,j)
                    rre_ice(k,i)   = rreice_p(i,k,j)
                    rre_snow(k,i)  = rresnow_p(i,k,j)
-                enddo
-                enddo
-                enddo
-             else
-                do j = jts,jte
-                do k = kts,kte
-                do i = its,ite
-                   rre_cloud(k,i) = 0._RKIND
-                   rre_ice(k,i)   = 0._RKIND
-                   rre_snow(k,i)  = 0._RKIND
-                enddo
-                enddo
-                enddo
-             endif
-
-          case("mp_p3")
-             call mpas_pool_get_array(diag_physics,'rre_cloud',rre_cloud)
-             call mpas_pool_get_array(diag_physics,'rre_ice'  ,rre_ice  )
-             call mpas_pool_get_array(diag_physics,'rre_snow' ,rre_snow )
-             if(config_microp_re) then
-                do j = jts,jte
-                do k = kts,kte
-                do i = its,ite
-                   !1/re if RRTMG_LW does not return rre:
-                   if(rrecloud_p(i,k,j) .gt. 0._RKIND) then
-                      rre_cloud(k,i) = rrecloud_p(i,k,j)
-                   else if(recloud_p(i,k,j) .gt. 0._RKIND) then
-                      rre_cloud(k,i) = 1._RKIND / recloud_p(i,k,j)
-                   else
-                      rre_cloud(k,i) = 0._RKIND
-                   endif
-
-                   if(rreice_p(i,k,j) .gt. 0._RKIND) then
-                      rre_ice(k,i) = rreice_p(i,k,j)
-                   else if(reice_p(i,k,j) .gt. 0._RKIND) then
-                      rre_ice(k,i) = 1._RKIND / reice_p(i,k,j)
-                   else
-                      rre_ice(k,i) = 0._RKIND
-                   endif
-
-                   if(rresnow_p(i,k,j) .gt. 0._RKIND) then
-                      rre_snow(k,i) = rresnow_p(i,k,j)
-                   else if(resnow_p(i,k,j) .gt. 0._RKIND) then
-                      rre_snow(k,i) = 1._RKIND / resnow_p(i,k,j)
-                   else
-                      rre_snow(k,i) = 0._RKIND
-                   endif
                 enddo
                 enddo
                 enddo
