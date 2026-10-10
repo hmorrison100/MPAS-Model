@@ -13,7 +13,8 @@
 
  implicit none
  private
- public:: p3mix_p,rp3blten_p,              &
+ public:: p3mix_p,rp3blten_p,nmix_max,     &
+          p3_scalar_indices,               &
           allocate_p3pbl,                  &
           deallocate_p3pbl,                &
           p3pbl_from_MPAS,                 &
@@ -32,7 +33,13 @@
 !            As for cloud ice, the P3 scalars are mixed only if config_mynn_mixclouds = 1.
 !The PBL tendencies of the P3 scalars are stored in rp3blten (tend_physics) and added to the scalar
 !tendencies in p3pbl_add_tend. The order of the P3 scalars, n = 1,nmix, is: p3_qit (categories 1 to nCat),
-!p3_qni, p3_qir, p3_qib, then p3_qzi and p3_qli if active.
+!p3_qni, p3_qir, p3_qib, then p3_qzi and p3_qli if active (p3_scalar_indices, also used by
+!mpas_atmphys_p3_cumix).
+!
+!The other microphysics scalars of P3 are mixed by the PBL schemes as for the other microphysics schemes:
+! * bl_ysu : qc (as for all schemes). nc, nwfa and nifa are not mixed (as for mp_thompson_aerosols).
+! * bl_mynn: qc and nc, and nwfa and nifa with config_p3_aerosols (as for mp_thompson_aerosols).
+! * qr and nr are not mixed by the PBL schemes (as for all schemes).
 
  integer,parameter:: nmix_max = 18          !must match the Registry dimension nP3pblmax.
 
@@ -44,9 +51,11 @@
 
 
 !=================================================================================================================
- subroutine p3pbl_indices(configs,state,nmix,idx)
+ subroutine p3_scalar_indices(configs,state,nmix,idx)
 !=================================================================================================================
-!returns the number of P3 scalars mixed by the PBL and, if state is present, their indices in scalars.
+!returns the number nmix of P3 ice-category scalars and, if state and idx are present, their indices in
+!scalars, in the order p3_qit (categories 1 to nCat), p3_qni, p3_qir, p3_qib, then p3_qzi and p3_qli if
+!active: the index of scalar n (n = 1 for p3_qit, ...) of category c is idx(c+(n-1)*nCat).
 
 !input arguments:
  type(mpas_pool_type),intent(in):: configs
@@ -60,7 +69,7 @@
  integer,pointer:: p3_nCat
  logical,pointer:: p3_trplMomI,p3_liqfrac
  integer,pointer:: index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi,index_p3_qli
- integer:: c
+ integer:: c,n
 
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -72,36 +81,32 @@
  if(p3_trplMomI) nmix = nmix + p3_nCat
  if(p3_liqfrac ) nmix = nmix + p3_nCat
 
- if(present(idx) .and. present(state)) then
-    call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
-    call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
-    call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
-    call mpas_pool_get_dimension(state,'index_p3_qib',index_p3_qib)
-    call mpas_pool_get_dimension(state,'index_p3_qzi',index_p3_qzi)
-    call mpas_pool_get_dimension(state,'index_p3_qli',index_p3_qli)
-    idx(:) = -1
-    do c = 1, p3_nCat
-       idx(c)           = index_p3_qit + c - 1
-       idx(c+  p3_nCat) = index_p3_qni + c - 1
-       idx(c+2*p3_nCat) = index_p3_qir + c - 1
-       idx(c+3*p3_nCat) = index_p3_qib + c - 1
-    enddo
-    nmix = 4*p3_nCat
+ if(.not.(present(idx) .and. present(state))) return
+
+ call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
+ call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
+ call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
+ call mpas_pool_get_dimension(state,'index_p3_qib',index_p3_qib)
+ call mpas_pool_get_dimension(state,'index_p3_qzi',index_p3_qzi)
+ call mpas_pool_get_dimension(state,'index_p3_qli',index_p3_qli)
+ idx(:) = -1
+ do c = 1, p3_nCat
+    idx(c)           = index_p3_qit + c - 1
+    idx(c+  p3_nCat) = index_p3_qni + c - 1
+    idx(c+2*p3_nCat) = index_p3_qir + c - 1
+    idx(c+3*p3_nCat) = index_p3_qib + c - 1
+    n = 4
     if(p3_trplMomI) then
-       do c = 1, p3_nCat
-          idx(nmix+c) = index_p3_qzi + c - 1
-       enddo
-       nmix = nmix + p3_nCat
+       n = n + 1
+       idx(c+(n-1)*p3_nCat) = index_p3_qzi + c - 1
     endif
     if(p3_liqfrac) then
-       do c = 1, p3_nCat
-          idx(nmix+c) = index_p3_qli + c - 1
-       enddo
-       nmix = nmix + p3_nCat
+       n = n + 1
+       idx(c+(n-1)*p3_nCat) = index_p3_qli + c - 1
     endif
- endif
+ enddo
 
- end subroutine p3pbl_indices
+ end subroutine p3_scalar_indices
 
 !=================================================================================================================
  subroutine allocate_p3pbl(configs)
@@ -126,7 +131,7 @@
  if(trim(pbl_scheme) /= 'bl_ysu' .and. trim(pbl_scheme) /= 'bl_mynn') return
  if(trim(sfclayer_scheme) == 'off') return
 
- call p3pbl_indices(configs,nmix=nmix)
+ call p3_scalar_indices(configs,nmix=nmix)
  if(.not.allocated(p3mix_p)   ) allocate(p3mix_p(ims:ime,kms:kme,jms:jme,nmix)   )
  if(.not.allocated(rp3blten_p)) allocate(rp3blten_p(ims:ime,kms:kme,jms:jme,nmix))
  p3mix_p(:,:,:,:)    = 0._RKIND
@@ -162,7 +167,7 @@
 
  if(.not.allocated(p3mix_p)) return
 
- call p3pbl_indices(configs,state,nmix,idx)
+ call p3_scalar_indices(configs,state,nmix,idx)
  do n = 1, nmix
     do j = jts,jte
     do k = kts,kte
@@ -180,7 +185,8 @@
 !=================================================================================================================
 !implicit vertical diffusion of the P3 scalars with the MYNN heat exchange coefficient. This is the MYNN
 !cloud-ice mixing in mynn_tendencies: khdz = rho_interface*K_h/dz_interface, no flux at the surface
-!(K_h = 0 at the lowest interface), and the value at the top level is held fixed.
+!(K_h = 0 at the lowest interface), and the value at the top level is held fixed. The tridiagonal solver of
+!MYNN (tridiag2) is private to bl_mynn_subroutines (MMM-physics), hence p3pbl_tridiag.
 
 !input arguments:
  integer,intent(in):: its,ite
@@ -319,7 +325,7 @@
  call mpas_pool_get_array(tend_physics,'rp3blten',rp3blten)
  if(.not.associated(rp3blten)) return
 
- call p3pbl_indices(configs,state,nmix,idx)
+ call p3_scalar_indices(configs,state,nmix,idx)
  do i = 1, nCellsSolve
  do k = 1, nVertLevels
     do n = 1, nmix

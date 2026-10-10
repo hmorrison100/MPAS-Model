@@ -253,6 +253,9 @@ mpas_atmphys_init_microphysics.o: \
 	mpas_atmphys_p3_cumix.o \
 	mpas_atmphys_utilities.o
 
+mpas_atmphys_p3_cumix.o: \
+	mpas_atmphys_p3_pblmix.o
+
 mpas_atmphys_p3_pblmix.o: \
 	mpas_atmphys_vars.o
 

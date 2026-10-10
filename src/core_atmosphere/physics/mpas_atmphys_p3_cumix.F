@@ -11,6 +11,7 @@
  use mpas_pool_routines
  use mpas_constants,only: pii
  use microphy_p3,only: icecat_destination,G_of_mu,p3_deltaD_init
+ use mpas_atmphys_p3_pblmix,only: nmix_max,p3_scalar_indices
 
  implicit none
  private
@@ -19,7 +20,12 @@
 !mpas_atmphys_p3_cumix couples the P3 cloud microphysics with the convection schemes. The convection schemes
 !(cu_ntiedtke, cu_tiedtke, cu_grell_freitas, cu_kain_fritsch) return the tendencies of the mass mixing ratios
 !of the condensate detrained into the grid-scale environment (rqccuten, rqicuten and, for cu_kain_fritsch,
-!rqrcuten and rqscuten), but no number tendencies. With P3:
+!rqrcuten and rqscuten), but no number tendencies. With the other microphysics schemes (e.g. mp_thompson,
+!mp_tempo), only these mass tendencies are added, and the number concentrations (nc, nr, ni) are not changed
+!by the convection. P3 differs here: number tendencies consistent with the detrained mass are added, because
+!the properties of the P3 ice (mean size, density, destination category and, for triple-moment ice, Z) depend
+!on the ice number, and to keep the mean size of the detrained cloud droplets and rain drops physical.
+!With P3:
 ! * cloud water: rqccuten is added to qc (in physics_get_tend_work). If config_p3_predictNc, the corresponding
 !   number tendency is added to nc assuming detrained droplets of radius config_p3_cu_rc.
 ! * rain       : rqrcuten (cu_kain_fritsch only) is added to qr (in physics_get_tend_work). The corresponding
@@ -86,53 +92,43 @@
 
 !local variables and pointers:
  character(len=StrKIND),pointer:: convection_scheme
- logical,pointer:: p3_predictNc,p3_trplMomI,p3_liqfrac
+ logical,pointer:: p3_predictNc,p3_trplMomI
  integer,pointer:: p3_nCat
- integer,pointer:: index_nc,index_nr,index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi, &
-                   index_p3_qli
+ integer,pointer:: index_nc,index_nr
  real(kind=RKIND),pointer:: p3_cu_rc,p3_cu_rr,p3_cu_ri,dt
  real(kind=RKIND),dimension(:,:),pointer:: rqccuten,rqrcuten,rqicuten,rqscuten
  real(kind=RKIND),dimension(:,:,:),pointer:: p3_rhoi
 
  integer:: c,i,k,n,nscal,icat
- integer,dimension(6*nCat_max):: idx
+ integer,dimension(nmix_max):: idx
  real(kind=RKIND):: rmass_c,rmass_r,rmass_i,qiten
  real(kind=RKIND):: d_cu,deltaD_init,zfac,qsum,rate,rho_c
  real(kind=RKIND):: dq,n_old,y_old,z_new,n_new
  real(kind=RKIND),dimension(nCat_max):: qi_cat,di_cat
- logical:: add_qr,add_qs
+ logical:: kain_fritsch
 
 !-----------------------------------------------------------------------------------------------------------------
 
  call mpas_pool_get_config(configs,'config_convection_scheme',convection_scheme)
  call mpas_pool_get_config(configs,'config_p3_nCat'          ,p3_nCat          )
  call mpas_pool_get_config(configs,'config_p3_trplMomI'      ,p3_trplMomI      )
- call mpas_pool_get_config(configs,'config_p3_liqfrac'       ,p3_liqfrac       )
  call mpas_pool_get_config(configs,'config_p3_predictNc'     ,p3_predictNc     )
  call mpas_pool_get_config(configs,'config_p3_cu_rc'         ,p3_cu_rc         )
  call mpas_pool_get_config(configs,'config_p3_cu_rr'         ,p3_cu_rr         )
  call mpas_pool_get_config(configs,'config_p3_cu_ri'         ,p3_cu_ri         )
  call mpas_pool_get_config(configs,'config_dt'               ,dt               )
 
- call mpas_pool_get_dimension(state,'index_nc'    ,index_nc    )
- call mpas_pool_get_dimension(state,'index_nr'    ,index_nr    )
- call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
- call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
- call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
- call mpas_pool_get_dimension(state,'index_p3_qib',index_p3_qib)
- call mpas_pool_get_dimension(state,'index_p3_qzi',index_p3_qzi)
- call mpas_pool_get_dimension(state,'index_p3_qli',index_p3_qli)
+ call mpas_pool_get_dimension(state,'index_nc',index_nc)
+ call mpas_pool_get_dimension(state,'index_nr',index_nr)
 
- nullify(rqccuten)
- nullify(rqrcuten)
- nullify(rqicuten)
- nullify(rqscuten)
+!rqccuten and rqicuten are allocated for all convection schemes, rqrcuten and rqscuten for cu_kain_fritsch:
+ kain_fritsch = trim(convection_scheme) == 'cu_kain_fritsch'
  call mpas_pool_get_array(tend_physics,'rqccuten',rqccuten)
- call mpas_pool_get_array(tend_physics,'rqrcuten',rqrcuten)
  call mpas_pool_get_array(tend_physics,'rqicuten',rqicuten)
- call mpas_pool_get_array(tend_physics,'rqscuten',rqscuten)
- add_qr = trim(convection_scheme) == 'cu_kain_fritsch' .and. associated(rqrcuten) .and. index_nr > 0
- add_qs = trim(convection_scheme) == 'cu_kain_fritsch' .and. associated(rqscuten)
+ if(kain_fritsch) then
+    call mpas_pool_get_array(tend_physics,'rqrcuten',rqrcuten)
+    call mpas_pool_get_array(tend_physics,'rqscuten',rqscuten)
+ endif
 
 !inverse mass of a detrained droplet, rain drop and ice particle (kg-1):
  rmass_c = 1._RKIND / (4._RKIND/3._RKIND*pii*rho_w*p3_cu_rc**3)
@@ -140,7 +136,7 @@
  rmass_i = 1._RKIND / (4._RKIND/3._RKIND*pii*rho_i*p3_cu_ri**3)
 
 !cloud water number:
- if(p3_predictNc .and. index_nc > 0 .and. associated(rqccuten)) then
+ if(p3_predictNc) then
     do i = 1, nCellsSolve
     do k = 1, nVertLevels
        tend_scalars(index_nc,k,i) = tend_scalars(index_nc,k,i) + max(0._RKIND,rqccuten(k,i))*rmass_c*mass(k,i)
@@ -149,7 +145,7 @@
  endif
 
 !rain number (cu_kain_fritsch):
- if(add_qr) then
+ if(kain_fritsch) then
     do i = 1, nCellsSolve
     do k = 1, nVertLevels
        tend_scalars(index_nr,k,i) = tend_scalars(index_nr,k,i) + max(0._RKIND,rqrcuten(k,i))*rmass_r*mass(k,i)
@@ -157,29 +153,11 @@
     enddo
  endif
 
- if(.not. associated(rqicuten)) return
-
 !cloud ice:
 !indices of the P3 scalars of category c: idx(c+(n-1)*p3_nCat), n = 1 (p3_qit), 2 (p3_qni), 3 (p3_qir),
-!4 (p3_qib), then p3_qzi and p3_qli when active (nscal scalars per category):
- nscal = 4
- if(p3_trplMomI) nscal = nscal + 1
- if(p3_liqfrac ) nscal = nscal + 1
- do c = 1, p3_nCat
-    idx(c          ) = index_p3_qit + c - 1
-    idx(c+  p3_nCat) = index_p3_qni + c - 1
-    idx(c+2*p3_nCat) = index_p3_qir + c - 1
-    idx(c+3*p3_nCat) = index_p3_qib + c - 1
-    n = 4
-    if(p3_trplMomI) then
-       n = n + 1
-       idx(c+(n-1)*p3_nCat) = index_p3_qzi + c - 1
-    endif
-    if(p3_liqfrac) then
-       n = n + 1
-       idx(c+(n-1)*p3_nCat) = index_p3_qli + c - 1
-    endif
- enddo
+!4 (p3_qib), then p3_qzi (n = 5) and p3_qli when active (nscal scalars per category):
+ call p3_scalar_indices(configs,state,nscal,idx)
+ nscal = nscal/p3_nCat
 
 !destination category of the detrained ice (config_p3_nCat > 1): diameter of the detrained ice and P3 threshold
 !size difference for a new category; bulk density of the existing ice from the last P3 call:
@@ -197,7 +175,7 @@
  do i = 1, nCellsSolve
  do k = 1, nVertLevels
     qiten = rqicuten(k,i)
-    if(add_qs) qiten = qiten + rqscuten(k,i)
+    if(kain_fritsch) qiten = qiten + rqscuten(k,i)
 
     if(qiten > 0._RKIND) then
        !detrained ice, added to the destination category icat:
@@ -222,11 +200,11 @@
           !p3_qzi is Y = sqrt(Z N): Z of the existing ice from Y and N, plus that of the detrained ice:
           dq    = qiten*dt
           n_old = max(0._RKIND,scalars(idx(icat+p3_nCat),k,i))
-          y_old = max(0._RKIND,scalars(index_p3_qzi+icat-1,k,i))
+          y_old = max(0._RKIND,scalars(idx(icat+4*p3_nCat),k,i))
           z_new = zfac*dq
           if(n_old >= nsmall) z_new = z_new + (y_old/n_old)*y_old
           n_new = n_old + dq*rmass_i
-          tend_scalars(index_p3_qzi+icat-1,k,i) = tend_scalars(index_p3_qzi+icat-1,k,i) &
+          tend_scalars(idx(icat+4*p3_nCat),k,i) = tend_scalars(idx(icat+4*p3_nCat),k,i) &
              + (sqrt(z_new)*sqrt(n_new) - y_old)/dt*mass(k,i)
        endif
 
