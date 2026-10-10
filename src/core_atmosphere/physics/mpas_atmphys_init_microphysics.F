@@ -13,7 +13,6 @@
  use mpas_kind_types
  use mpas_log
  use mpas_pool_routines
- use, intrinsic :: ieee_arithmetic
 
  use mpas_atmphys_utilities
  use mpas_atmphys_p3_cumix,only: p3cu_add_ic_ice
@@ -260,9 +259,7 @@
  subroutine init_p3_forMPAS(do_restart,dminfo,configs,state,time_lev)
 !=================================================================================================================
 !
-! Cold-start initialization of the P3 prognostic scalars (mp_p3): replaces missing (NaN/Inf) or negative values
-! of the bulk scalars and of the P3 ice-category scalars by zero, then initializes the P3 ice consistently with the
-! ice of the initial conditions (p3cu_add_ic_ice):
+! Cold-start initialization of the P3 ice consistently with the ice of the initial conditions (p3cu_add_ic_ice):
 ! * with config_p3_ic_bulk_ice, the bulk ice qi + qs + qg of the initial conditions (data assimilation analysis or
 !   forecast with another microphysics scheme) is added to the P3 ice as ice detrained by the convection scheme
 !   (config_p3_cu_ri, unrimed, dry), and qi, qs and qg are then set to zero (they stay zero for the whole run).
@@ -282,109 +279,30 @@
 
 !local variables and pointers:
  logical,pointer:: p3_ic_bulk_ice
- integer,pointer:: index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi,index_p3_qli
- integer,pointer:: index_qv,index_qc,index_qr,index_qi,index_qs,index_qg
- integer,pointer:: index_nc,index_nr
- integer:: c,nCat_reg
+ integer,pointer:: index_qi,index_qs,index_qg
  real(kind=RKIND):: qadd_max_local,qadd_max
 
  real(kind=RKIND),dimension(:,:,:),pointer:: scalars
- real(kind=RKIND),dimension(:,:),pointer  :: qv,qc,qr,qi,qs,qg,nc,nr
+ real(kind=RKIND),dimension(:,:),pointer  :: qi,qs,qg
  real(kind=RKIND),dimension(:,:),allocatable:: qadd
 
 !-----------------------------------------------------------------------------------------------------------------
- call mpas_log_write('--- init_p3_forMPAS: begin', masterOnly=.true.)
+
 !... if do_restart is true, the P3 scalars are read from the restart file and are not modified:
  if(do_restart) return
 
  call mpas_pool_get_config(configs,'config_p3_ic_bulk_ice',p3_ic_bulk_ice)
-
  call mpas_pool_get_array(state,'scalars',scalars,time_lev)
- if (.not. associated(scalars)) then
-    call physics_error_fatal('init_p3_forMPAS: state%scalars is not associated')
- endif
 
- call mpas_pool_get_dimension(state,'index_qv',index_qv)
- call mpas_pool_get_dimension(state,'index_qc',index_qc)
- call mpas_pool_get_dimension(state,'index_qr',index_qr)
- call mpas_pool_get_dimension(state,'index_qi',index_qi)
- call mpas_pool_get_dimension(state,'index_qs',index_qs)
- call mpas_pool_get_dimension(state,'index_qg',index_qg)
- call mpas_pool_get_dimension(state,'index_nc',index_nc)
- call mpas_pool_get_dimension(state,'index_nr',index_nr)
- if (.not. associated(index_qv) .or. .not. associated(index_qc) .or. .not. associated(index_qr) .or. &
-     .not. associated(index_qi) .or. .not. associated(index_qs) .or. .not. associated(index_qg) .or. &
-     .not. associated(index_nc) .or. .not. associated(index_nr)) then
-    call physics_error_fatal('init_p3_forMPAS: missing one or more bulk scalar indices required by P3')
- endif
-
- qv => scalars(index_qv,:,:)
- qc => scalars(index_qc,:,:)
- qr => scalars(index_qr,:,:)
- nc => scalars(index_nc,:,:)
- nr => scalars(index_nr,:,:)
-!the bulk qi, qs and qg scalars are allocated with P3 only with config_p3_ic_bulk_ice (index = -1 otherwise):
- nullify(qi,qs,qg)
  if (p3_ic_bulk_ice) then
-    if (index_qi < 1 .or. index_qs < 1 .or. index_qg < 1) then
-       call physics_error_fatal('init_p3_forMPAS: config_p3_ic_bulk_ice is true but qi, qs or qg is not allocated')
-    endif
+    !the bulk qi, qs and qg scalars are allocated with P3 only with config_p3_ic_bulk_ice:
+    call mpas_pool_get_dimension(state,'index_qi',index_qi)
+    call mpas_pool_get_dimension(state,'index_qs',index_qs)
+    call mpas_pool_get_dimension(state,'index_qg',index_qg)
     qi => scalars(index_qi,:,:)
     qs => scalars(index_qs,:,:)
     qg => scalars(index_qg,:,:)
- endif
 
-!replace missing (NaN/Inf), negative or unphysically large values by zero:
- where (.not. ieee_is_finite(qv) .or. qv < 0._RKIND .or. qv > 1._RKIND) qv = 0._RKIND
- where (.not. ieee_is_finite(qc) .or. qc < 0._RKIND .or. qc > 0.2_RKIND) qc = 0._RKIND
- where (.not. ieee_is_finite(qr) .or. qr < 0._RKIND .or. qr > 0.2_RKIND) qr = 0._RKIND
- if (associated(qi)) then
-    where (.not. ieee_is_finite(qi) .or. qi < 0._RKIND .or. qi > 0.2_RKIND) qi = 0._RKIND
- end if
- if (associated(qs)) then
-    where (.not. ieee_is_finite(qs) .or. qs < 0._RKIND .or. qs > 0.2_RKIND) qs = 0._RKIND
- end if
- if (associated(qg)) then
-    where (.not. ieee_is_finite(qg) .or. qg < 0._RKIND .or. qg > 0.2_RKIND) qg = 0._RKIND
- end if
- where (.not. ieee_is_finite(nc) .or. nc < 0._RKIND .or. nc > 1.0e12_RKIND) nc = 0._RKIND
- where (.not. ieee_is_finite(nr) .or. nr < 0._RKIND .or. nr > 1.0e12_RKIND) nr = 0._RKIND
-
-!the initial conditions usually do not contain the P3 ice-category scalars: make sure that they are defined
-!before they are used by the dynamics (atm_compute_moist_coefficients) and the halo exchanges:
- call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
- call mpas_pool_get_dimension(state,'index_p3_qni',index_p3_qni)
- call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
- call mpas_pool_get_dimension(state,'index_p3_qib',index_p3_qib)
- call mpas_pool_get_dimension(state,'index_p3_qzi',index_p3_qzi)
- call mpas_pool_get_dimension(state,'index_p3_qli',index_p3_qli)
-!number of P3 ice categories (p3_qit is in the moist group, apart from p3_qni, p3_qir and p3_qib):
- if (.not.associated(index_p3_qit) .or. .not.associated(index_p3_qni) .or. &
-     .not.associated(index_p3_qir) .or. .not.associated(index_p3_qib) .or. &
-     .not.associated(index_p3_qzi) .or. .not.associated(index_p3_qli)) then
-    call physics_error_fatal('init_p3_forMPAS: missing P3 scalar indices in the state pool')
- endif
- nCat_reg = max(1, index_p3_qir - index_p3_qni)
- if (index_p3_qit + nCat_reg - 1 > size(scalars,1)) nCat_reg = 1
- if(dminfo % my_proc_id == IO_NODE) then
-    call mpas_log_write('--- init_p3_forMPAS: P3 nCat_layout = $i', intArgs=(/nCat_reg/))
-    call mpas_log_write('--- init_p3_forMPAS: P3 scalar indices (qit,qni,qir,qib,qzi,qli) = $i $i $i $i $i $i', &
-                        intArgs=(/index_p3_qit,index_p3_qni,index_p3_qir,index_p3_qib,index_p3_qzi,index_p3_qli/))
- endif
-
-!replace missing (NaN/Inf) or negative values of the P3 ice-category scalars by zero (p3_qzi and p3_qli are
-!allocated only with config_p3_trplMomI and config_p3_liqfrac; index = -1 otherwise):
- do c = 0, nCat_reg-1
-    call p3_zero_bad(index_p3_qit+c)
-    call p3_zero_bad(index_p3_qni+c)
-    call p3_zero_bad(index_p3_qir+c)
-    call p3_zero_bad(index_p3_qib+c)
-    if (index_p3_qzi > 0) call p3_zero_bad(index_p3_qzi+c)
-    if (index_p3_qli > 0) call p3_zero_bad(index_p3_qli+c)
- end do
-
-!P3 ice consistent with the ice of the initial conditions:
- if (p3_ic_bulk_ice) then
     allocate(qadd(size(scalars,2),size(scalars,3)))
     qadd(:,:) = qi(:,:) + qs(:,:) + qg(:,:)
     qadd_max_local = maxval(qadd)
@@ -399,15 +317,6 @@
  else
     call p3cu_add_ic_ice(configs,state,scalars)
  endif
-
- call mpas_log_write('--- init_p3_forMPAS: end', masterOnly=.true.)
-
- contains
-
- subroutine p3_zero_bad(n)
- integer,intent(in):: n
- where (.not. ieee_is_finite(scalars(n,:,:)) .or. scalars(n,:,:) < 0._RKIND) scalars(n,:,:) = 0._RKIND
- end subroutine p3_zero_bad
 
  end subroutine init_p3_forMPAS
 
@@ -449,48 +358,28 @@
  real(kind=RKIND),dimension(:,:),allocatable:: hgt
 
 !-----------------------------------------------------------------------------------------------------------------
- call mpas_log_write('--- init_p3_aerosols_forMPAS: begin', masterOnly=.true.)
 !... if do_restart is true, then we do not need to check the initialization of nwfa, nifa, and nwfa2d. If false,
 !    then, we proceed with the initialization:
  if(do_restart) return
 
  call mpas_pool_get_dimension(mesh,'nCellsSolve',nCellsSolve)
  call mpas_pool_get_dimension(mesh,'nVertLevels',nVertLevels)
- if (.not. associated(nCellsSolve) .or. .not. associated(nVertLevels)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: missing nCellsSolve/nVertLevels mesh dimensions')
- endif
 
  call mpas_pool_get_array(mesh,'areaCell',areaCell)
  call mpas_pool_get_array(mesh,'zgrid'   ,zgrid   )
  call mpas_pool_get_array(mesh,'zz'      ,zz      )
- if (.not. associated(areaCell) .or. .not. associated(zgrid) .or. .not. associated(zz)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: missing areaCell/zgrid/zz mesh arrays')
- endif
 
  call mpas_pool_get_array(diag_physics,'nifa2d',nifa2d)
  call mpas_pool_get_array(diag_physics,'nwfa2d',nwfa2d)
- if (.not. associated(nifa2d) .or. .not. associated(nwfa2d)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: nifa2d/nwfa2d are not active in diag_physics;' // &
-                             ' check Registry packages for mp_p3_aers_in')
- endif
 
  call mpas_pool_get_dimension(state,'index_nifa'  ,index_nifa  )
  call mpas_pool_get_dimension(state,'index_nwfa'  ,index_nwfa  )
 
  call mpas_pool_get_array(state,'scalars',scalars,time_lev)
- if (.not. associated(index_nifa) .or. .not. associated(index_nwfa) .or. .not. associated(scalars)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: missing nifa/nwfa scalar indices or state%scalars')
- endif
  nifa   => scalars(index_nifa,:,:)
  nwfa   => scalars(index_nwfa,:,:)
 
- where (.not. ieee_is_finite(nwfa) .or. nwfa < 0._RKIND .or. nwfa > 1.0e12_RKIND) nwfa = 0._RKIND
- where (.not. ieee_is_finite(nifa) .or. nifa < 0._RKIND .or. nifa > 1.0e12_RKIND) nifa = 0._RKIND
-
  call mpas_pool_get_array(state,'rho_zz',rho_zz,time_lev)
- if (.not. associated(rho_zz)) then
-    call physics_error_fatal('init_p3_aerosols_forMPAS: state%rho_zz is not associated')
- endif
 
  if(.not.allocated(hgt)) allocate(hgt(1:nVertLevels,1:nCellsSolve))
  do iCell = 1, nCellsSolve
@@ -571,7 +460,7 @@
  k = 1
  do iCell = 1, nCellsSolve
     airmass = rho_zz(k,iCell)*zz(k,iCell)
-    airmass = airmass*(zgrid(k+1,iCell)-zgrid(k,iCell))*areaCell(iCell) ! (in kg; as in init_thompson_aerosols_forMPAS)
+    airmass = airmass*(zgrid(k+1,iCell)-zgrid(k,iCell))*areaCell(iCell) ! (in kg)
     nwfa2d(iCell) = nwfa(k,iCell)*0.000196*airmass*0.5e-10
     nifa2d(iCell) = 0._RKIND
 !   call mpas_log_write('$i $r $r $r',intArgs=(/iCell/),realArgs=(/airmass,nwfa2d(iCell),nifa2d(iCell)/))
@@ -579,8 +468,6 @@
 
 !... deallocate local arrays:
  if(allocated(hgt)) deallocate(hgt)
-
- call mpas_log_write('--- init_p3_aerosols_forMPAS: end', masterOnly=.true.)
 
  end subroutine init_p3_aerosols_forMPAS
 
