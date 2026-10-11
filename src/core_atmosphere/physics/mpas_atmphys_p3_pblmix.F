@@ -34,14 +34,18 @@
 !The PBL tendencies of the P3 scalars are stored in rp3blten (tend_physics) and added to the scalar
 !tendencies in p3pbl_add_tend. The order of the P3 scalars, n = 1,nmix, is: p3_qit (categories 1 to nCat),
 !p3_qni, p3_qir, p3_qib, then p3_qzi and p3_qli if active (p3_scalar_indices, also used by
-!mpas_atmphys_p3_cumix).
+!mpas_atmphys_p3_cumix), then nc, nwfa and nifa with bl_ysu (p3pbl_mix_indices).
 !
-!The other microphysics scalars of P3 are mixed by the PBL schemes as for the other microphysics schemes:
-! * bl_ysu : qc (as for all schemes). nc, nwfa and nifa are not mixed (as for mp_thompson_aerosols).
+!The other microphysics scalars of P3 are mixed by the PBL schemes as follows:
+! * bl_ysu : qc (as for all schemes). nc (config_p3_predictNc), and nwfa and nifa (config_p3_aerosols), are
+!            mixed with the P3 scalars above, so that nc is mixed together with qc and the aerosols are mixed
+!            in the PBL.
 ! * bl_mynn: qc and nc, and nwfa and nifa with config_p3_aerosols (as for mp_thompson_aerosols).
 ! * qr and nr are not mixed by the PBL schemes (as for all schemes).
 
- integer,parameter:: nmix_max = 18          !must match the Registry dimension nP3pblmax.
+!maximum number of scalars mixed by the PBL: 6 P3 scalars per ice category (3 categories), plus nc, nwfa and
+!nifa with bl_ysu. nmix_max must match the Registry dimension nP3pblmax.
+ integer,parameter:: nmix_max = 6*3 + 3
 
 !PBL input (P3 scalars) and output (tendencies) arrays, allocated only for mp_p3 with bl_ysu or bl_mynn:
  real(kind=RKIND),dimension(:,:,:,:),allocatable:: p3mix_p,rp3blten_p
@@ -109,6 +113,57 @@
  end subroutine p3_scalar_indices
 
 !=================================================================================================================
+ subroutine p3pbl_mix_indices(configs,state,nmix,idx)
+!=================================================================================================================
+!returns the number nmix of scalars mixed by the PBL for mp_p3 and, if state and idx are present, their
+!indices in scalars: the P3 ice-category scalars (p3_scalar_indices) then, with bl_ysu only, nc
+!(config_p3_predictNc), and nwfa and nifa (config_p3_aerosols). bl_mynn mixes nc, nwfa and nifa itself.
+
+!input arguments:
+ type(mpas_pool_type),intent(in):: configs
+ type(mpas_pool_type),intent(in),optional:: state
+
+!output arguments:
+ integer,intent(out):: nmix
+ integer,intent(out),dimension(nmix_max),optional:: idx
+
+!local variables and pointers:
+ character(len=StrKIND),pointer:: pbl_scheme
+ logical,pointer:: p3_predictNc,p3_aerosols
+ integer,pointer:: index_nc,index_nwfa,index_nifa
+ logical:: get_idx
+
+!-----------------------------------------------------------------------------------------------------------------
+
+ call p3_scalar_indices(configs,state,nmix,idx)
+ get_idx = present(idx) .and. present(state)
+
+ call mpas_pool_get_config(configs,'config_pbl_scheme',pbl_scheme)
+ if(trim(pbl_scheme) /= 'bl_ysu') return
+
+ call mpas_pool_get_config(configs,'config_p3_predictNc',p3_predictNc)
+ call mpas_pool_get_config(configs,'config_p3_aerosols' ,p3_aerosols )
+
+ if(p3_predictNc) then
+    nmix = nmix + 1
+    if(get_idx) then
+       call mpas_pool_get_dimension(state,'index_nc',index_nc)
+       idx(nmix) = index_nc
+    endif
+ endif
+ if(p3_aerosols) then
+    nmix = nmix + 2
+    if(get_idx) then
+       call mpas_pool_get_dimension(state,'index_nwfa',index_nwfa)
+       call mpas_pool_get_dimension(state,'index_nifa',index_nifa)
+       idx(nmix-1) = index_nwfa
+       idx(nmix)   = index_nifa
+    endif
+ endif
+
+ end subroutine p3pbl_mix_indices
+
+!=================================================================================================================
  subroutine allocate_p3pbl(configs)
 !=================================================================================================================
 !allocates p3mix_p and rp3blten_p for mp_p3 when the YSU or MYNN PBL scheme is called. These arrays must be
@@ -131,7 +186,7 @@
  if(trim(pbl_scheme) /= 'bl_ysu' .and. trim(pbl_scheme) /= 'bl_mynn') return
  if(trim(sfclayer_scheme) == 'off') return
 
- call p3_scalar_indices(configs,nmix=nmix)
+ call p3pbl_mix_indices(configs,nmix=nmix)
  if(.not.allocated(p3mix_p)   ) allocate(p3mix_p(ims:ime,kms:kme,jms:jme,nmix)   )
  if(.not.allocated(rp3blten_p)) allocate(rp3blten_p(ims:ime,kms:kme,jms:jme,nmix))
  p3mix_p(:,:,:,:)    = 0._RKIND
@@ -167,7 +222,7 @@
 
  if(.not.allocated(p3mix_p)) return
 
- call p3_scalar_indices(configs,state,nmix,idx)
+ call p3pbl_mix_indices(configs,state,nmix,idx)
  do n = 1, nmix
     do j = jts,jte
     do k = kts,kte
@@ -325,7 +380,7 @@
  call mpas_pool_get_array(tend_physics,'rp3blten',rp3blten)
  if(.not.associated(rp3blten)) return
 
- call p3_scalar_indices(configs,state,nmix,idx)
+ call p3pbl_mix_indices(configs,state,nmix,idx)
  do i = 1, nCellsSolve
  do k = 1, nVertLevels
     do n = 1, nmix

@@ -8,8 +8,8 @@
 
  <dims>
 
-      <dim name="nP3pblmax"          definition="18"
-           description="Maximum number of P3 prognostic scalars mixed by the PBL (6 per ice category, 3 categories)"/>
+      <dim name="nP3pblmax"          definition="21"
+           description="Maximum number of P3 prognostic scalars mixed by the PBL (6 per ice category, 3 categories, plus nc, nwfa and nifa with bl_ysu)"/>
 
       <dim name="nIceCat"            definition="namelist:config_p3_nCat"
            description="The number of P3 ice categories"/>
