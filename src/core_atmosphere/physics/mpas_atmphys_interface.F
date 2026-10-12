@@ -1026,10 +1026,13 @@ end subroutine pre_microphysics
  real(kind=RKIND),dimension(:,:),pointer  :: rncmpten,rnimpten,rnrmpten,rnifampten,rnwfampten
  real(kind=RKIND),dimension(:,:,:),pointer:: scalars
  integer,pointer:: mp_top_level
+ logical,pointer:: p3_liqfrac
+ integer,pointer:: p3_nCat
+ integer,pointer:: index_p3_qit,index_p3_qir,index_p3_qli
 
 !local variables:
  integer:: icount
- integer:: i,k,j
+ integer:: c,i,k,j
  real(kind=RKIND):: rho1,rho2,tem1,tem2
 
 !-----------------------------------------------------------------------------------------------------------------
@@ -1226,6 +1229,26 @@ end subroutine pre_microphysics
        end select mp2_select
 
     case("mp_p3")
+       ! no microphysics updates above mp_top_level: as qi, qs and qg above, the P3 ice mass mixing ratios
+       ! (written to scalars in driver_microphysics) are set to zero. The number, rime volume and 6th moment
+       ! are not; P3 sets them to zero at its next call where the ice mass is zero:
+       if(kte .gt. mp_top_level) then
+          call mpas_pool_get_config(configs,'config_p3_nCat'   ,p3_nCat   )
+          call mpas_pool_get_config(configs,'config_p3_liqfrac',p3_liqfrac)
+          call mpas_pool_get_dimension(state,'index_p3_qit',index_p3_qit)
+          call mpas_pool_get_dimension(state,'index_p3_qir',index_p3_qir)
+          call mpas_pool_get_dimension(state,'index_p3_qli',index_p3_qli)
+          do i = its,ite
+          do k = mp_top_level+1,kte
+             do c = 1,p3_nCat
+                scalars(index_p3_qit+c-1,k,i) = 0.
+                scalars(index_p3_qir+c-1,k,i) = 0.
+                if(p3_liqfrac) scalars(index_p3_qli+c-1,k,i) = 0.
+             enddo
+          enddo
+          enddo
+       endif
+
        !the P3 ice categories were written to scalars in driver_microphysics. qi, qs, qg and ni are not
        !allocated with mp_p3: qi and ni point to the sums over the updated P3 ice categories, and qs and qg to
        !zero, for the tendencies below; nothing is written to them:
